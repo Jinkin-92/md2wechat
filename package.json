@@ -1,0 +1,50 @@
+{
+  "name": "md2wechat",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local Markdown to WeChat draft publisher.",
+  "workspaces": [
+    "client"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:server": "set PORT=3410&& set CORS_ORIGIN=http://localhost:5373&& tsx watch src/server/index.ts",
+    "dev:client": "npm run dev --workspace client",
+    "build": "npm run build:server && npm run build:client",
+    "build:server": "tsc -p tsconfig.json",
+    "build:client": "npm run build --workspace client",
+    "lint": "npm run lint --workspace client",
+    "playwright:login": "tsx scripts/playwright-login.ts",
+    "start": "node dist/server/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "multer": "^2.0.2",
+    "puppeteer": "^24.7.1",
+    "rehype-stringify": "^10.0.1",
+    "remark-gfm": "^4.0.1",
+    "remark-parse": "^11.0.0",
+    "remark-rehype": "^11.1.2",
+    "unified": "^11.0.5",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.59.1",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.3",
+    "@types/multer": "^2.0.0",
+    "@types/node": "^24.6.0",
+    "concurrently": "^9.2.1",
+    "playwright": "^1.59.1",
+    "supertest": "^7.2.2",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.4"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

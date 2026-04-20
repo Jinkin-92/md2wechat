@@ -1,0 +1,37 @@
+[
+  {
+    "id": "acct_main",
+    "name": "产业观察主号",
+    "status": "ready",
+    "lastValidatedAt": "2026-04-14T07:26:01.310Z",
+    "note": "已进入公众号编辑器，准备继续执行内容填充。",
+    "latestLoginProbe": {
+      "pageTitle": "公众号",
+      "finalUrl": "https://mp.weixin.qq.com/cgi-bin/home?t=home/index&lang=zh_CN&token=1464570220",
+      "screenshotPath": "d:\\code\\md2wechat\\data\\screenshots\\1776151544553-产业观察主号-wechat-entry.png",
+      "loginState": "authenticated",
+      "usedStoredSession": true
+    },
+    "latestDraftProbe": {
+      "pageTitle": "公众号",
+      "finalUrl": "https://mp.weixin.qq.com/cgi-bin/appmsg?t=media%2Fappmsg_edit&action=edit&type=77&appmsgid=100000073&token=1464570220&lang=zh_CN&timestamp=1776151557914",
+      "screenshotPath": "d:\\code\\md2wechat\\data\\screenshots\\1776151550916-产业观察主号-wechat-home.png",
+      "backendReachable": true,
+      "usedStoredSession": true,
+      "draftEntryDetected": true,
+      "matchedSelector": "existing-draft:100000073",
+      "editorReachable": true,
+      "editorUrl": "https://mp.weixin.qq.com/cgi-bin/appmsg?t=media%2Fappmsg_edit&action=edit&type=77&appmsgid=100000073&token=1464570220&lang=zh_CN&timestamp=1776151557914",
+      "matchedTitleSelector": "textarea#title"
+    }
+  },
+  {
+    "id": "acct_backup",
+    "name": "测试草稿号",
+    "status": "expired",
+    "lastValidatedAt": null,
+    "note": "已清除本地 Session，需要重新导入或扫码登录。",
+    "latestLoginProbe": null,
+    "latestDraftProbe": null
+  }
+]

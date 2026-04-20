@@ -1,0 +1,38 @@
+node_modules/
+dist/
+client/dist/
+data/articles/*
+data/sessions/*
+data/uploads/*
+data/screenshots/*
+!data/articles/.gitkeep
+!data/sessions/.gitkeep
+!data/uploads/.gitkeep
+!data/screenshots/.gitkeep
+.env
+.DS_Store
+npm-debug.log*
+pnpm-lock.yaml
+yarn.lock
+
+# Logs
+*.log
+*.out.log
+*.err.log
+
+# Test artifacts
+test-results/
+playwright-report/
+
+# Temp files
+tmp-*.json
+tmp-*.html
+
+# Build info
+tsconfig.tsbuildinfo
+
+# Word docs (use git instead)
+*.docx
+
+# BMad output (generated)
+_bmad-output/

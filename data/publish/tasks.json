@@ -1,0 +1,208 @@
+[
+  {
+    "id": "task_1776151544289_e93a8ef8",
+    "articleId": "art_1775800421243_85d1804f",
+    "accountId": "acct_main",
+    "draftAppmsgId": "100000073",
+    "result": {
+      "saveScreenshotPath": "d:\\code\\md2wechat\\data\\screenshots\\1776151561648-产业观察主号-wechat-save.png",
+      "reopenScreenshotPath": "d:\\code\\md2wechat\\data\\screenshots\\1776151579179-产业观察主号-wechat-reopen.png",
+      "reopenUrl": "https://mp.weixin.qq.com/cgi-bin/appmsg?t=media%2Fappmsg_edit&action=edit&type=77&appmsgid=100000073&token=1464570220&lang=zh_CN&timestamp=1776151581989",
+      "saveSuccessText": "已保存",
+      "coverImageApplied": true,
+      "coverImagePath": "d:\\code\\md2wechat\\data\\article-assets\\art_1775800421243_85d1804f\\1776148964391-3.png",
+      "insertedBodyImagePaths": [
+        "d:\\code\\md2wechat\\data\\article-assets\\art_1775800421243_85d1804f\\1776148964376-1.png",
+        "d:\\code\\md2wechat\\data\\article-assets\\art_1775800421243_85d1804f\\1776149012425-2.png"
+      ],
+      "missingBodyImagePaths": [],
+      "reopenRichTextPreserved": true
+    },
+    "status": "success",
+    "createdAt": "2026-04-14T07:25:44.289Z",
+    "updatedAt": "2026-04-14T07:26:25.639Z",
+    "steps": [
+      {
+        "key": "session-check",
+        "label": "检查账号登录态",
+        "status": "success",
+        "detail": "已打开公众号入口，页面标题为“公众号”，当前状态=authenticated，已加载本地 Session，截图=d:\\code\\md2wechat\\data\\screenshots\\1776151544553-产业观察主号-wechat-entry.png。"
+      },
+      {
+        "key": "draft-open",
+        "label": "进入公众号草稿",
+        "status": "success",
+        "detail": "已进入编辑器，草稿入口选择器=existing-draft:100000073，标题输入框=textarea#title，编辑器地址=https://mp.weixin.qq.com/cgi-bin/appmsg?t=media%2Fappmsg_edit&action=edit&type=77&appmsgid=100000073&token=1464570220&lang=zh_CN&timestamp=1776151557914。"
+      },
+      {
+        "key": "content-fill",
+        "label": "写入内容与素材",
+        "status": "success",
+        "detail": "已写入文章“算力的交叉点”的标题、摘要和正文，正文图片=2 张，封面=已应用。"
+      },
+      {
+        "key": "draft-save",
+        "label": "保存并复检草稿",
+        "status": "success",
+        "detail": "已点击 #js_submit button 并收到“已保存”，保存后复检富文本=是。"
+      }
+    ]
+  },
+  {
+    "id": "task_1776151192541_faad50d7",
+    "articleId": "art_1775800421243_85d1804f",
+    "accountId": "acct_main",
+    "draftAppmsgId": "100000073",
+    "result": {
+      "saveScreenshotPath": "d:\\code\\md2wechat\\data\\screenshots\\1776151215763-产业观察主号-wechat-save.png",
+      "reopenScreenshotPath": "d:\\code\\md2wechat\\data\\screenshots\\1776151234071-产业观察主号-wechat-reopen.png",
+      "reopenUrl": "https://mp.weixin.qq.com/cgi-bin/appmsg?t=media%2Fappmsg_edit&action=edit&type=77&appmsgid=100000073&token=1464570220&lang=zh_CN&timestamp=1776151237042",
+      "saveSuccessText": "已保存",
+      "coverImageApplied": true,
+      "coverImagePath": "d:\\code\\md2wechat\\data\\article-assets\\art_1775800421243_85d1804f\\1776148964391-3.png",
+      "insertedBodyImagePaths": [],
+      "missingBodyImagePaths": [
+        "正文图片 1",
+        "正文图片 2"
+      ],
+      "reopenRichTextPreserved": true
+    },
+    "status": "success",
+    "createdAt": "2026-04-14T07:19:52.541Z",
+    "updatedAt": "2026-04-14T07:20:41.144Z",
+    "steps": [
+      {
+        "key": "session-check",
+        "label": "检查账号登录态",
+        "status": "success",
+        "detail": "已打开公众号入口，页面标题为“公众号”，当前状态=authenticated，已加载本地 Session，截图=d:\\code\\md2wechat\\data\\screenshots\\1776151196690-产业观察主号-wechat-entry.png。"
+      },
+      {
+        "key": "draft-open",
+        "label": "进入公众号草稿",
+        "status": "success",
+        "detail": "已进入编辑器，草稿入口选择器=existing-draft:100000073，标题输入框=textarea#title，编辑器地址=https://mp.weixin.qq.com/cgi-bin/appmsg?t=media%2Fappmsg_edit&action=edit&type=77&appmsgid=100000073&token=1464570220&lang=zh_CN&timestamp=1776151211283。"
+      },
+      {
+        "key": "content-fill",
+        "label": "写入内容与素材",
+        "status": "success",
+        "detail": "已写入文章“算力的交叉点”的标题、摘要和正文，正文图片=0 张，封面=已应用。"
+      },
+      {
+        "key": "draft-save",
+        "label": "保存并复检草稿",
+        "status": "success",
+        "detail": "已点击 #js_submit button 并收到“已保存”，保存后复检富文本=是。"
+      }
+    ]
+  },
+  {
+    "id": "task_1776066508069_7bc04247",
+    "articleId": "art_1775800421243_85d1804f",
+    "accountId": "acct_main",
+    "draftAppmsgId": "100000073",
+    "status": "success",
+    "createdAt": "2026-04-13T07:48:28.069Z",
+    "updatedAt": "2026-04-13T07:49:24.547Z",
+    "steps": [
+      {
+        "key": "session-check",
+        "label": "妫€鏌ヨ处鍙风櫥褰曟€?",
+        "status": "success",
+        "detail": "宸叉墦寮€鍏紬鍙峰叆鍙ｏ紝椤甸潰鏍囬涓衡€滃叕浼楀彿鈥濓紝褰撳墠鐘舵€?authenticated锛屽凡鍔犺浇鏈湴 Session锛屾埅鍥?D:\\code\\md2wechat\\data\\screenshots\\1776066513956-浜т笟瑙傚療涓诲彿-wechat-entry.png銆?"
+      },
+      {
+        "key": "draft-open",
+        "label": "杩涘叆鍏紬鍙疯崏绋跨",
+        "status": "success",
+        "detail": "宸茶繘鍏ョ紪杈戝櫒锛岃崏绋垮叆鍙ｉ€夋嫨鍣?existing-draft:100000073锛屾爣棰樿緭鍏ユ=textarea#title锛岀紪杈戝櫒鍦板潃=https://mp.weixin.qq.com/cgi-bin/appmsg?t=media%2Fappmsg_edit&action=edit&type=77&appmsgid=100000073&token=1464570220&lang=zh_CN&timestamp=1776066528349銆?"
+      },
+      {
+        "key": "content-fill",
+        "label": "鍐欏叆鏍囬涓庢鏂?",
+        "status": "success",
+        "detail": "宸插啓鍏ユ枃绔犫€??????鈥濈殑鏍囬銆佹憳瑕佸拰姝ｆ枃锛屾爣棰橀€夋嫨鍣?textarea#title锛屾鏂囬€夋嫨鍣?div.ProseMirror[contenteditable='true']锛屾鏂囧浘鐗?0 寮狅紝灏侀潰=宸插簲鐢ㄣ€?"
+      },
+      {
+        "key": "draft-save",
+        "label": "淇濆瓨鑽夌",
+        "status": "success",
+        "detail": "宸茶Е鍙?#js_submit button 骞舵敹鍒扳€滃凡淇濆瓨鈥濇彁绀猴紝淇濆瓨鎴浘=D:\\code\\md2wechat\\data\\screenshots\\1776066533695-浜т笟瑙傚療涓诲彿-wechat-save.png銆傛鏂囧浘鐗?0 寮狅紝灏侀潰=宸插簲鐢紝缂哄け绱犳潗=銆愭澶勬彃鍏?GLM Coding Plan 闄愯喘/鍊欒ˉ鎴浘銆戙€併€愭澶勬彃鍏ヤ緵闇€浜ゅ弶鎶樼嚎鍥俱€戯紝淇濆瓨鍚庡妫€瀵屾枃鏈?鏄紝澶嶆鎴浘=D:\\code\\md2wechat\\data\\screenshots\\1776066556651-浜т笟瑙傚療涓诲彿-wechat-reopen.png銆?"
+      }
+    ],
+    "result": null
+  },
+  {
+    "id": "task_1776066257970_db686b31",
+    "articleId": "art_1775800421243_85d1804f",
+    "accountId": "acct_main",
+    "draftAppmsgId": "100000073",
+    "status": "success",
+    "createdAt": "2026-04-13T07:44:17.970Z",
+    "updatedAt": "2026-04-13T07:45:11.648Z",
+    "steps": [
+      {
+        "key": "session-check",
+        "label": "妫€鏌ヨ处鍙风櫥褰曟€?",
+        "status": "success",
+        "detail": "宸叉墦寮€鍏紬鍙峰叆鍙ｏ紝椤甸潰鏍囬涓衡€滃叕浼楀彿鈥濓紝褰撳墠鐘舵€?authenticated锛屽凡鍔犺浇鏈湴 Session锛屾埅鍥?D:\\code\\md2wechat\\data\\screenshots\\1776066262977-浜т笟瑙傚療涓诲彿-wechat-entry.png銆?"
+      },
+      {
+        "key": "draft-open",
+        "label": "杩涘叆鍏紬鍙疯崏绋跨",
+        "status": "success",
+        "detail": "宸茶繘鍏ョ紪杈戝櫒锛岃崏绋垮叆鍙ｉ€夋嫨鍣?a[title='鑽夌绠?]锛屾爣棰樿緭鍏ユ=textarea#title锛岀紪杈戝櫒鍦板潃=https://mp.weixin.qq.com/cgi-bin/appmsg?t=media%2Fappmsg_edit_v2&action=edit&isNew=1&type=77&token=1464570220&lang=zh_CN&timestamp=1776066280895銆?"
+      },
+      {
+        "key": "content-fill",
+        "label": "鍐欏叆鏍囬涓庢鏂?",
+        "status": "success",
+        "detail": "宸插啓鍏ユ枃绔犫€??????鈥濈殑鏍囬銆佹憳瑕佸拰姝ｆ枃锛屾爣棰橀€夋嫨鍣?textarea#title锛屾鏂囬€夋嫨鍣?div.ProseMirror[contenteditable='true']锛屾鏂囧浘鐗?0 寮狅紝灏侀潰=宸插簲鐢ㄣ€?"
+      },
+      {
+        "key": "draft-save",
+        "label": "淇濆瓨鑽夌",
+        "status": "success",
+        "detail": "宸茶Е鍙?#js_submit button 骞舵敹鍒扳€滃凡淇濆瓨鈥濇彁绀猴紝淇濆瓨鎴浘=D:\\code\\md2wechat\\data\\screenshots\\1776066285188-浜т笟瑙傚療涓诲彿-wechat-save.png銆傛鏂囧浘鐗?0 寮狅紝灏侀潰=宸插簲鐢紝缂哄け绱犳潗=銆愭澶勬彃鍏?GLM Coding Plan 闄愯喘/鍊欒ˉ鎴浘銆戙€併€愭澶勬彃鍏ヤ緵闇€浜ゅ弶鎶樼嚎鍥俱€戯紝淇濆瓨鍚庡妫€瀵屾枃鏈?鏄紝澶嶆鎴浘=D:\\code\\md2wechat\\data\\screenshots\\1776066304419-浜т笟瑙傚療涓诲彿-wechat-reopen.png銆?"
+      }
+    ],
+    "result": null
+  },
+  {
+    "id": "task_1775807182758_15e91a8a",
+    "articleId": "art_1775800421243_85d1804f",
+    "accountId": "acct_main",
+    "status": "success",
+    "createdAt": "2026-04-10T07:46:22.758Z",
+    "updatedAt": "2026-04-13T06:35:33.212Z",
+    "steps": [
+      {
+        "key": "session-check",
+        "label": "妫€鏌ヨ处鍙风櫥褰曟€?",
+        "status": "success",
+        "detail": "宸叉墦寮€鍏紬鍙峰叆鍙ｏ紝椤甸潰鏍囬涓衡€滃叕浼楀彿鈥濓紝褰撳墠鐘舵€?authenticated锛屽凡鍔犺浇鏈湴 Session锛屾埅鍥?D:\\code\\md2wechat\\data\\screenshots\\1776062089328-浜т笟瑙傚療涓诲彿-wechat-entry.png銆?"
+      },
+      {
+        "key": "draft-open",
+        "label": "杩涘叆鍏紬鍙疯崏绋跨",
+        "status": "success",
+        "detail": "宸茶繘鍏ョ紪杈戝櫒锛岃崏绋垮叆鍙ｉ€夋嫨鍣?a[title='鑽夌绠?]锛屾爣棰樿緭鍏ユ=textarea#title锛岀紪杈戝櫒鍦板潃=https://mp.weixin.qq.com/cgi-bin/appmsg?t=media%2Fappmsg_edit_v2&action=edit&isNew=1&type=77&token=1464570220&lang=zh_CN&timestamp=1776062104497銆?"
+      },
+      {
+        "key": "content-fill",
+        "label": "鍐欏叆鏍囬涓庢鏂?",
+        "status": "success",
+        "detail": "宸插啓鍏ユ枃绔犫€滅畻鍔涚殑浜ゅ弶鐐光€濈殑鏍囬銆佹憳瑕佸拰姝ｆ枃锛屾爣棰橀€夋嫨鍣?textarea#title锛屾鏂囬€夋嫨鍣?div.ProseMirror[contenteditable='true']锛屾鏂囧浘鐗?2 寮狅紝灏侀潰=宸插簲鐢ㄣ€?"
+      },
+      {
+        "key": "draft-save",
+        "label": "淇濆瓨鑽夌",
+        "status": "success",
+        "detail": "宸茶Е鍙?#js_submit button 骞舵敹鍒扳€滃凡淇濆瓨鈥濇彁绀猴紝淇濆瓨鎴浘=D:\\code\\md2wechat\\data\\screenshots\\1776062108330-浜т笟瑙傚療涓诲彿-wechat-save.png銆傛鏂囧浘鐗?2 寮狅紝灏侀潰=宸插簲鐢紝缂哄け绱犳潗=鏃狅紝淇濆瓨鍚庡妫€瀵屾枃鏈?鏄紝澶嶆鎴浘=D:\\code\\md2wechat\\data\\screenshots\\1776062126049-浜т笟瑙傚療涓诲彿-wechat-reopen.png銆?"
+      }
+    ],
+    "draftAppmsgId": null,
+    "result": null
+  }
+]
