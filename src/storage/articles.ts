@@ -56,39 +56,107 @@ function resolveDesktopImagePath(basename: string): string | null {
   return candidates.find((candidate) => fs.existsSync(candidate)) ?? null;
 }
 
+function resolveWorkspaceImagePath(basename: string): string | null {
+  const candidates = [".png", ".jpg", ".jpeg", ".webp", ".gif"].map((extension) =>
+    path.join(process.cwd(), `${basename}${extension}`)
+  );
+
+  return candidates.find((candidate) => fs.existsSync(candidate)) ?? null;
+}
+
+function resolveSeedImagePath(basename: string): string | null {
+  return resolveWorkspaceImagePath(basename) ?? resolveDesktopImagePath(basename);
+}
+
+function persistSeedAsset(articleId: string, sourcePath: string): {
+  absolutePath: string;
+  storageKey: string;
+} {
+  ensureStorageDirs();
+
+  const assetDir = getArticleAssetDir(articleId);
+  fs.mkdirSync(assetDir, { recursive: true });
+
+  const targetName = `${Date.now()}-${sanitizeFileName(path.basename(sourcePath))}`;
+  const absolutePath = path.join(assetDir, targetName);
+  fs.copyFileSync(sourcePath, absolutePath);
+
+  return {
+    absolutePath,
+    storageKey: path.relative(getAppConfig().dataDir, absolutePath).replace(/\\/g, "/")
+  };
+}
+
 function extractImagePlaceholders(rawMarkdown: string): string[] {
   return [...rawMarkdown.matchAll(/\u3010\u6b64\u5904\u63d2\u5165[^\u3011]+\u3011/g)].map(
     (match) => match[0]
   );
 }
 
-function createBodyImageAsset(placeholder: string, index: number): ArticleBodyImageAsset {
+function createBodyImageAsset(
+  articleId: string,
+  placeholder: string,
+  index: number,
+  persistAssets: boolean
+): ArticleBodyImageAsset {
   const slotId = `slot_${index + 1}`;
+  const sourcePath = resolveSeedImagePath(String(index + 1));
+  const storedAsset = sourcePath && persistAssets ? persistSeedAsset(articleId, sourcePath) : null;
+
   return {
     id: slotId,
     placeholder,
     label: `正文图片 ${index + 1}`,
     markerToken: `[[MD2WECHAT_IMAGE_${slotId.toUpperCase()}]]`,
-    localPath: resolveDesktopImagePath(String(index + 1)),
-    storageKey: null
+    localPath: storedAsset?.absolutePath ?? sourcePath ?? null,
+    storageKey: storedAsset?.storageKey ?? null
   };
 }
 
-function buildDefaultMediaAssets(markdown: string, coverLocalPath: string | null): ArticleMediaAssets {
+function buildDefaultMediaAssets(
+  articleId: string,
+  markdown: string,
+  persistAssets = false
+): ArticleMediaAssets {
   const placeholders = extractImagePlaceholders(markdown);
-  const bodyImages = placeholders.map((placeholder, index) => createBodyImageAsset(placeholder, index));
+  const bodyImages = placeholders.map((placeholder, index) =>
+    createBodyImageAsset(articleId, placeholder, index, persistAssets)
+  );
+  const coverSourcePath = resolveSeedImagePath(String(placeholders.length + 1));
+  const storedCover =
+    coverSourcePath && persistAssets ? persistSeedAsset(articleId, coverSourcePath) : null;
 
   return {
-    coverLocalPath: coverLocalPath ?? resolveDesktopImagePath(String(placeholders.length + 1)),
-    coverStorageKey: null,
+    coverLocalPath: storedCover?.absolutePath ?? coverSourcePath ?? null,
+    coverStorageKey: storedCover?.storageKey ?? null,
     bodyImages
   };
 }
 
 function normalizeBodyImageAsset(
+  articleId: string,
   defaultItem: ArticleBodyImageAsset,
   matched: Partial<ArticleBodyImageAsset> | undefined
 ): ArticleBodyImageAsset {
+  let localPath =
+    typeof matched?.localPath === "string"
+      ? matched.localPath.trim() || null
+      : defaultItem.localPath;
+  let storageKey =
+    typeof matched?.storageKey === "string"
+      ? matched.storageKey.trim() || null
+      : defaultItem.storageKey;
+
+  if (localPath && !storageKey && fs.existsSync(localPath)) {
+    if (localPath.startsWith(getAppConfig().dataDir)) {
+      storageKey = path.relative(getAppConfig().dataDir, localPath).replace(/\\/g, "/");
+    } else {
+      const persisted = persistSeedAsset(articleId, localPath);
+      localPath = persisted.absolutePath;
+      storageKey = persisted.storageKey;
+    }
+  }
+
   return {
     id: typeof matched?.id === "string" && matched.id.trim() ? matched.id : defaultItem.id,
     placeholder: defaultItem.placeholder,
@@ -98,36 +166,43 @@ function normalizeBodyImageAsset(
       typeof matched?.markerToken === "string" && matched.markerToken.trim()
         ? matched.markerToken.trim()
         : defaultItem.markerToken,
-    localPath:
-      typeof matched?.localPath === "string"
-        ? matched.localPath.trim() || null
-        : defaultItem.localPath,
-    storageKey:
-      typeof matched?.storageKey === "string"
-        ? matched.storageKey.trim() || null
-        : defaultItem.storageKey
+    localPath,
+    storageKey
   };
 }
 
 function normalizeMediaAssets(article: ArticleRecord): ArticleMediaAssets {
-  const defaults = buildDefaultMediaAssets(article.rawMarkdown, article.coverImage.localPath);
+  const defaults = buildDefaultMediaAssets(article.id, article.rawMarkdown);
   const existing = article.mediaAssets;
 
   if (!existing) {
     return defaults;
   }
 
+  let coverLocalPath =
+    typeof existing.coverLocalPath === "string" ? existing.coverLocalPath : defaults.coverLocalPath;
+  let coverStorageKey =
+    typeof existing.coverStorageKey === "string" ? existing.coverStorageKey : defaults.coverStorageKey;
+
+  if (coverLocalPath && !coverStorageKey && fs.existsSync(coverLocalPath)) {
+    if (coverLocalPath.startsWith(getAppConfig().dataDir)) {
+      coverStorageKey = path.relative(getAppConfig().dataDir, coverLocalPath).replace(/\\/g, "/");
+    } else {
+      const persisted = persistSeedAsset(article.id, coverLocalPath);
+      coverLocalPath = persisted.absolutePath;
+      coverStorageKey = persisted.storageKey;
+    }
+  }
+
   return {
-    coverLocalPath:
-      typeof existing.coverLocalPath === "string" ? existing.coverLocalPath : defaults.coverLocalPath,
-    coverStorageKey:
-      typeof existing.coverStorageKey === "string" ? existing.coverStorageKey : defaults.coverStorageKey,
+    coverLocalPath,
+    coverStorageKey,
     bodyImages: defaults.bodyImages.map((defaultItem) => {
       const matched =
         existing.bodyImages?.find(
           (item) => item.id === defaultItem.id || item.placeholder === defaultItem.placeholder
         ) ?? undefined;
-      return normalizeBodyImageAsset(defaultItem, matched);
+      return normalizeBodyImageAsset(article.id, defaultItem, matched);
     })
   };
 }
@@ -210,7 +285,7 @@ export function createArticleFromUpload(input: {
       digest: "",
       wordCount: countWords(input.markdown)
     },
-    mediaAssets: buildDefaultMediaAssets(input.markdown, null),
+    mediaAssets: buildDefaultMediaAssets(id, input.markdown, true),
     status: "draft",
     createdAt: now,
     updatedAt: now
@@ -218,6 +293,19 @@ export function createArticleFromUpload(input: {
 
   saveArticle(article);
   return article;
+}
+
+export function getArticleBySourceFileName(sourceFileName: string): ArticleRecord | null {
+  ensureStorageDirs();
+
+  const normalizedTarget = normalizeUploadedFileName(sourceFileName);
+  const matched = fs
+    .readdirSync(ARTICLES_DIR)
+    .filter((fileName) => fileName.endsWith(".json"))
+    .map((fileName) => readJsonFile(path.join(ARTICLES_DIR, fileName)))
+    .find((article) => article.sourceFileName === normalizedTarget);
+
+  return matched ?? null;
 }
 
 export function listArticles(): ArticleSummary[] {

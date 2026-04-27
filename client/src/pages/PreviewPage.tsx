@@ -37,7 +37,7 @@ export function PreviewPage() {
   const [selectedArticleId, setSelectedArticleId] = useState(
     articleId ?? workbenchState.selectedArticleId
   );
-  const [templateId, setTemplateId] = useState(workbenchState.selectedTemplateId || "default-light");
+  const [templateId, setTemplateId] = useState(workbenchState.selectedTemplateId || "claude");
   const [titleInput, setTitleInput] = useState("");
   const [authorInput, setAuthorInput] = useState("");
   const [digestInput, setDigestInput] = useState("");
@@ -104,7 +104,7 @@ export function PreviewPage() {
         ]);
         setArticle(payload);
         setTasks(nextTasks);
-        setTemplateId(payload.templateId ?? (workbenchState.selectedTemplateId || "default-light"));
+        setTemplateId(payload.templateId ?? (workbenchState.selectedTemplateId || "claude"));
         setTitleInput(payload.title);
         setAuthorInput(payload.metadata.author);
         setDigestInput(payload.metadata.digest);

@@ -1,0 +1,48 @@
+export const SETTINGS_KEY = "mdpublisher_settings";
+
+export type AppSettings = {
+  apiUrl: string;
+  apiKey: string;
+  model: string;
+};
+
+export const DEFAULT_SETTINGS: AppSettings = {
+  apiUrl: "https://api.minimaxi.com/anthropic",
+  apiKey: "",
+  model: "MiniMax-M2.7"
+};
+
+export function readAppSettings(): AppSettings {
+  if (typeof window === "undefined") {
+    return DEFAULT_SETTINGS;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(SETTINGS_KEY);
+    if (!raw) {
+      return DEFAULT_SETTINGS;
+    }
+
+    const parsed = JSON.parse(raw) as Partial<AppSettings>;
+    return {
+      apiUrl: parsed.apiUrl ?? DEFAULT_SETTINGS.apiUrl,
+      apiKey: parsed.apiKey ?? DEFAULT_SETTINGS.apiKey,
+      model: parsed.model ?? DEFAULT_SETTINGS.model
+    };
+  } catch {
+    return DEFAULT_SETTINGS;
+  }
+}
+
+export function writeAppSettings(next: Partial<AppSettings>): AppSettings {
+  const merged = {
+    ...readAppSettings(),
+    ...next
+  };
+
+  if (typeof window !== "undefined") {
+    window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(merged));
+  }
+
+  return merged;
+}

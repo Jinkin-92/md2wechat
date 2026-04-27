@@ -6,10 +6,13 @@ import { parseMarkdown } from "../../renderer/parser.js";
 import {
   createArticleFromUpload,
   getArticleById,
+  getArticleBySourceFileName,
   listArticles,
   saveArticleAsset,
   updateArticle
 } from "../../storage/articles.js";
+import fs from "node:fs";
+import path from "node:path";
 
 const router = Router();
 const upload = multer({
@@ -23,6 +26,30 @@ router.get("/", (_req, res) => {
   res.json({
     items: listArticles()
   });
+});
+
+router.get("/default-preview", (req, res) => {
+  const previewFileName = "产业观察_算力交叉点_v6 (1).md";
+  const existingArticle = getArticleBySourceFileName(previewFileName);
+
+  if (existingArticle) {
+    return res.json(existingArticle);
+  }
+
+  const absolutePath = path.resolve(process.cwd(), previewFileName);
+  if (!fs.existsSync(absolutePath)) {
+    return res.status(404).json({
+      error: `默认预览文档不存在：${absolutePath}`
+    });
+  }
+
+  const markdown = fs.readFileSync(absolutePath, "utf8");
+  const article = createArticleFromUpload({
+    sourceFileName: previewFileName,
+    markdown
+  });
+
+  return res.json(article);
 });
 
 router.get("/:articleId", (req, res) => {
@@ -118,6 +145,20 @@ function updateArticleMetadata(req: Request, res: Response) {
 router.patch("/:articleId", updateArticleMetadata);
 router.put("/:articleId", updateArticleMetadata);
 
+router.patch("/:articleId/content", (req, res) => {
+  const articleId = Array.isArray(req.params.articleId) ? req.params.articleId[0] : req.params.articleId;
+  const article = getArticleById(articleId);
+
+  if (!article) {
+    return res.status(404).json({ error: "未找到对应的文章。" });
+  }
+
+  const rawMarkdown = typeof req.body.rawMarkdown === "string" ? req.body.rawMarkdown : article.rawMarkdown;
+
+  const updatedArticle = updateArticle({ ...article, rawMarkdown });
+  return res.json(updatedArticle);
+});
+
 router.post("/:articleId/assets", upload.single("file"), (req, res) => {
   const file = req.file;
   const kind = req.body.kind === "cover" ? "cover" : req.body.kind === "body" ? "body" : null;
@@ -163,7 +204,17 @@ router.post("/:articleId/assets", upload.single("file"), (req, res) => {
 
   void (async () => {
     const baseHtml = await parseMarkdown(savedArticle.rawMarkdown);
-    const renderedHtml = injectTemplateTokens(baseHtml, savedArticle.templateId ?? "default-light", savedArticle.mediaAssets);
+    const renderedHtml = injectTemplateTokens(
+      baseHtml,
+      savedArticle.templateId ?? "claude",
+      savedArticle.mediaAssets,
+      undefined,
+      {
+        title: savedArticle.title,
+        author: savedArticle.metadata.author,
+        digest: savedArticle.metadata.digest
+      }
+    );
     const renderedArticle = updateArticle({
       ...savedArticle,
       renderedHtml,
@@ -209,6 +260,7 @@ router.post("/upload", upload.single("file"), (req, res) => {
 router.post("/render", async (req, res) => {
   const articleId = String(req.body.articleId ?? "");
   const templateId = String(req.body.templateId ?? "default-light");
+  const customOptions = req.body.customOptions;
 
   if (!articleId) {
     return res.status(400).json({
@@ -224,7 +276,11 @@ router.post("/render", async (req, res) => {
   }
 
   const baseHtml = await parseMarkdown(article.rawMarkdown);
-  const renderedHtml = injectTemplateTokens(baseHtml, templateId, article.mediaAssets);
+  const renderedHtml = injectTemplateTokens(baseHtml, templateId, article.mediaAssets, customOptions, {
+    title: article.title,
+    author: article.metadata.author,
+    digest: article.metadata.digest
+  });
   const updatedArticle = updateArticle({
     ...article,
     templateId,

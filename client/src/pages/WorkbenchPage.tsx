@@ -1,18 +1,55 @@
-import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
 import {
+  applySmartTypesetting,
+  buildArticleAssetUrl,
   getArticle,
   getArticles,
   getTemplates,
   renderArticle,
+  updateArticleContent,
   updateArticleMetadata
 } from "../lib/api";
+import { extractEditableHtml, serializeEditableHtmlToMarkdown } from "../lib/rich-editor";
+import { readAppSettings } from "../lib/settings";
+import { getTemplateCardStyle } from "../lib/template-style";
 import { readWorkbenchState, writeWorkbenchState } from "../lib/workbench";
 import type { ArticleDetail, ArticleSummary, TemplateSummary } from "../types";
 
+function renderTemplateCard(
+  template: TemplateSummary,
+  isActive: boolean,
+  onClick: () => void
+) {
+  const style = getTemplateCardStyle(template.id);
+
+  return (
+    <button
+      key={template.id}
+      type="button"
+      className={`template-visual-card ${isActive ? "active" : ""}`}
+      onClick={onClick}
+      style={{ background: style.surface }}
+    >
+      <div
+        className="template-visual-preview"
+        style={{
+          background: style.bg,
+          color: style.text,
+          fontFamily: style.fontFamily
+        }}
+      >
+        <span className="template-visual-dot" style={{ background: style.accent }} />
+        <strong>{template.name}</strong>
+      </div>
+    </button>
+  );
+}
+
 export function WorkbenchPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const workbenchState = useMemo(() => readWorkbenchState(), []);
   const articleId = searchParams.get("articleId");
@@ -20,32 +57,28 @@ export function WorkbenchPage() {
   const [articles, setArticles] = useState<ArticleSummary[]>([]);
   const [templates, setTemplates] = useState<TemplateSummary[]>([]);
   const [article, setArticle] = useState<ArticleDetail | null>(null);
-  const [selectedArticleId, setSelectedArticleId] = useState(
-    articleId ?? workbenchState.selectedArticleId
-  );
-  const [selectedTemplateId, setSelectedTemplateId] = useState(
-    workbenchState.selectedTemplateId || "default-light"
-  );
+  const [selectedArticleId, setSelectedArticleId] = useState(articleId ?? workbenchState.selectedArticleId);
+  const [selectedTemplateId, setSelectedTemplateId] = useState(workbenchState.selectedTemplateId || "claude");
   const [titleInput, setTitleInput] = useState("");
   const [authorInput, setAuthorInput] = useState("");
   const [contentInput, setContentInput] = useState("");
-  const [isLoadingList, setIsLoadingList] = useState(true);
-  const [isRendering, setIsRendering] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const [showHtml, setShowHtml] = useState(false);
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
+  const [previewMode, setPreviewMode] = useState<"article" | "feed" | "html">("article");
   const [leftPanel, setLeftPanel] = useState<"templates" | "custom">("templates");
-  const [showPublishMenu, setShowPublishMenu] = useState(false);
-  const [expandedTemplate, setExpandedTemplate] = useState<string | null>(null);
-
-  // Custom options state
   const [fontSize, setFontSize] = useState("16px");
   const [paragraphIndent, setParagraphIndent] = useState(false);
   const [spacing, setSpacing] = useState<"compact" | "normal" | "relaxed">("normal");
   const [sectionDivider, setSectionDivider] = useState("line");
   const [endMarker, setEndMarker] = useState("none");
   const [textCard, setTextCard] = useState("none");
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const [isRendering, setIsRendering] = useState(false);
+  const [isTypesetting, setIsTypesetting] = useState(false);
+
+  const editorRef = useRef<HTMLDivElement | null>(null);
+  const contentTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const metaTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     writeWorkbenchState({ selectedArticleId, selectedTemplateId });
@@ -53,7 +86,6 @@ export function WorkbenchPage() {
 
   useEffect(() => {
     async function loadListData() {
-      setIsLoadingList(true);
       try {
         const [nextArticles, nextTemplates] = await Promise.all([getArticles(), getTemplates()]);
         setArticles(nextArticles);
@@ -62,50 +94,145 @@ export function WorkbenchPage() {
           setSelectedArticleId(nextArticles[0].id);
         }
       } catch {
-        // use empty list
-      } finally {
-        setIsLoadingList(false);
+        setError("加载文章列表失败");
       }
     }
+
     void loadListData();
   }, []);
+
+  const triggerRender = useCallback(
+    async (
+      nextMarkdown?: string,
+      nextTitle?: string,
+      nextAuthor?: string,
+      optionOverrides?: Partial<{
+        fontSize: string;
+        spacing: "compact" | "normal" | "relaxed";
+        paragraphIndent: boolean;
+        sectionDivider: string;
+        endMarker: string;
+        textCard: string;
+        templateId: string;
+      }>
+    ) => {
+      if (!selectedArticleId) return;
+
+      setIsRendering(true);
+      setMessage("");
+      try {
+        const lineHeightMap = { compact: "1.5", normal: "1.8", relaxed: "2.0" };
+        const nextSpacing = optionOverrides?.spacing ?? spacing;
+        const payload = await renderArticle(selectedArticleId, optionOverrides?.templateId ?? selectedTemplateId, {
+          fontSize: optionOverrides?.fontSize ?? fontSize,
+          lineHeight: lineHeightMap[nextSpacing],
+          paragraphIndent: optionOverrides?.paragraphIndent ?? paragraphIndent,
+          sectionDivider: optionOverrides?.sectionDivider ?? sectionDivider,
+          endMarker: optionOverrides?.endMarker ?? endMarker,
+          textCard: optionOverrides?.textCard ?? textCard
+        });
+
+        const mergedPayload = {
+          ...payload,
+          rawMarkdown: nextMarkdown ?? payload.rawMarkdown,
+          title: nextTitle ?? payload.title,
+          metadata: {
+            ...payload.metadata,
+            author: nextAuthor ?? payload.metadata.author
+          }
+        };
+        setArticle(mergedPayload);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "渲染失败");
+      } finally {
+        setIsRendering(false);
+      }
+    },
+    [selectedArticleId, selectedTemplateId, fontSize, spacing, paragraphIndent, sectionDivider, endMarker, textCard]
+  );
 
   useEffect(() => {
     if (!selectedArticleId) {
       setArticle(null);
       return;
     }
+
     navigate(`/workbench?articleId=${selectedArticleId}`, { replace: true });
 
     async function load() {
       try {
         const payload = await getArticle(selectedArticleId);
-        setArticle(payload);
-        setSelectedTemplateId(payload.templateId ?? (workbenchState.selectedTemplateId || "default-light"));
-        setTitleInput(payload.title);
-        setAuthorInput(payload.metadata.author);
-        setContentInput(payload.rawMarkdown);
+        const nextTemplateId = payload.templateId ?? "claude";
+        const hydratedPayload =
+          payload.renderedHtml && payload.templateId
+            ? payload
+            : await renderArticle(selectedArticleId, nextTemplateId, {
+                fontSize: "16px",
+                lineHeight: "1.8",
+                paragraphIndent: false,
+                sectionDivider: "line",
+                endMarker: "none",
+                textCard: "none"
+              });
+        setArticle(hydratedPayload);
+        setSelectedTemplateId(nextTemplateId);
+        setTitleInput(hydratedPayload.title);
+        setAuthorInput(hydratedPayload.metadata.author);
+        setContentInput(hydratedPayload.rawMarkdown);
       } catch {
         setError("加载文章失败");
       }
     }
+
     void load();
   }, [selectedArticleId]);
 
-  async function handleRender() {
-    if (!selectedArticleId) return;
-    setIsRendering(true);
-    setMessage("");
-    try {
-      const payload = await renderArticle(selectedArticleId, selectedTemplateId);
-      setArticle(payload);
-      setMessage("预览已更新");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "渲染失败");
-    } finally {
-      setIsRendering(false);
+  useEffect(() => {
+    if (!article) return;
+    const nextEditorHtml = extractEditableHtml(article.renderedHtml);
+    if (editorRef.current && editorRef.current.innerHTML !== nextEditorHtml) {
+      editorRef.current.innerHTML = nextEditorHtml;
     }
-  }
+  }, [article?.renderedHtml, article?.updatedAt]);
+
+  const syncContent = useCallback(
+    (nextEditorMarkup: string) => {
+      if (!selectedArticleId || !article) return;
+      const nextMarkdown = serializeEditableHtmlToMarkdown(nextEditorMarkup, article);
+      setContentInput(nextMarkdown);
+      if (contentTimeoutRef.current) clearTimeout(contentTimeoutRef.current);
+      contentTimeoutRef.current = setTimeout(async () => {
+        try {
+          await updateArticleContent(selectedArticleId, nextMarkdown);
+          await triggerRender(nextMarkdown, titleInput, authorInput);
+        } catch {
+          setError("正文同步失败");
+        }
+      }, 500);
+    },
+    [article, authorInput, selectedArticleId, titleInput, triggerRender]
+  );
+
+  const syncMetadata = useCallback(
+    (nextTitle: string, nextAuthor: string) => {
+      if (metaTimeoutRef.current) clearTimeout(metaTimeoutRef.current);
+      metaTimeoutRef.current = setTimeout(async () => {
+        if (!selectedArticleId) return;
+        try {
+          const payload = await updateArticleMetadata(selectedArticleId, {
+            title: nextTitle,
+            author: nextAuthor,
+            digest: article?.metadata.digest ?? ""
+          });
+          setArticle(payload);
+          await triggerRender(contentInput, nextTitle, nextAuthor);
+        } catch {
+          setError("元数据同步失败");
+        }
+      }, 400);
+    },
+    [article?.metadata.digest, contentInput, selectedArticleId, triggerRender]
+  );
 
   async function handleSave() {
     if (!selectedArticleId) return;
@@ -115,14 +242,68 @@ export function WorkbenchPage() {
       const payload = await updateArticleMetadata(selectedArticleId, {
         title: titleInput,
         author: authorInput,
-        digest: ""
+        digest: article?.metadata.digest ?? ""
       });
       setArticle(payload);
+      await triggerRender(contentInput, titleInput, authorInput);
       setMessage("已保存");
     } catch (err) {
       setError(err instanceof Error ? err.message : "保存失败");
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  async function handleTemplateSwitch(templateId: string) {
+    setSelectedTemplateId(templateId);
+    if (!selectedArticleId) return;
+    setIsRendering(true);
+    try {
+      const payload = await renderArticle(selectedArticleId, templateId, {
+        fontSize,
+        lineHeight: { compact: "1.5", normal: "1.8", relaxed: "2.0" }[spacing],
+        paragraphIndent,
+        sectionDivider,
+        endMarker,
+        textCard
+      });
+      setArticle(payload);
+      setMessage("模板已切换");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "切换失败");
+    } finally {
+      setIsRendering(false);
+    }
+  }
+
+  async function handleSmartTypeset() {
+    if (!selectedArticleId) return;
+
+    const settings = readAppSettings();
+    if (!settings.apiKey.trim()) {
+      setError("请先在设置页填写 Minimax API Key");
+      return;
+    }
+
+    setIsTypesetting(true);
+    setMessage("");
+    setError("");
+    try {
+      const payload = await applySmartTypesetting({
+        articleId: selectedArticleId,
+        apiUrl: settings.apiUrl,
+        apiKey: settings.apiKey,
+        model: settings.model
+      });
+      setArticle(payload);
+      setTitleInput(payload.title);
+      setAuthorInput(payload.metadata.author);
+      setContentInput(payload.rawMarkdown);
+      setMessage("智能排版已完成");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "智能排版失败");
+    } finally {
+      setIsTypesetting(false);
     }
   }
 
@@ -133,37 +314,25 @@ export function WorkbenchPage() {
     });
   }
 
-  async function handleTemplateSwitch(templateId: string) {
-    setSelectedTemplateId(templateId);
-    setExpandedTemplate(null);
-    if (!selectedArticleId) return;
-    setIsRendering(true);
-    setMessage("");
-    try {
-      const payload = await renderArticle(selectedArticleId, templateId);
-      setArticle(payload);
-      setMessage("模板已切换");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "切换失败");
-    } finally {
-      setIsRendering(false);
-    }
-  }
-
   const wordCount = contentInput.replace(/\s/g, "").length;
-  const readTime = Math.max(1, Math.ceil(wordCount / 300));
-
-  // Compute inline styles from custom options for real-time preview
-  const lineHeightMap = { compact: "1.5", normal: "1.8", relaxed: "2.0" };
-  const previewStyle: React.CSSProperties = {
-    fontSize,
-    lineHeight: lineHeightMap[spacing],
-    textIndent: paragraphIndent ? "2em" : "0",
-  };
+  const readTime = Math.max(1, Math.ceil(wordCount / 320));
+  const coverPreviewUrl = buildArticleAssetUrl({
+    storageKey: article?.mediaAssets.coverStorageKey ?? null,
+    localPath: article?.mediaAssets.coverLocalPath ?? article?.coverImage.localPath ?? null
+  });
+  const digestPreview =
+    article?.metadata.digest.trim() ||
+    contentInput
+      .replace(/^#+\s+/gm, "")
+      .split(/\n{2,}/)
+      .map((item) => item.replace(/\s+/g, " ").trim())
+      .find(Boolean)
+      ?.slice(0, 84) ||
+    "暂无摘要";
+  const selectedTemplateStyle = getTemplateCardStyle(selectedTemplateId);
 
   return (
-    <div className="workbench">
-      {/* Top Menu Bar */}
+    <div className="workbench workbench-refined">
       <header className="workbench-topbar">
         <div className="workbench-topbar-left">
           <button className="workbench-icon-btn" onClick={() => navigate("/")} title="首页">
@@ -171,78 +340,35 @@ export function WorkbenchPage() {
               <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
             </svg>
           </button>
-          <button className="workbench-icon-btn" onClick={() => navigate("/settings")} title="设置">
+          <button
+            className="workbench-icon-btn"
+            onClick={() => navigate("/settings", { state: { from: `${location.pathname}${location.search}` } })}
+            title="设置"
+          >
             <svg viewBox="0 0 24 24" width="18" height="18">
               <path d="M12 15a3 3 0 100-6 3 3 0 000 6z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
               <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9c.26.604.852.997 1.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
             </svg>
           </button>
-          <button
-            className="workbench-icon-btn"
-            onClick={() => {
-              setSelectedArticleId("");
-              setArticle(null);
-              navigate("/");
-            }}
-            title="重新上传"
-          >
-            <svg viewBox="0 0 24 24" width="18" height="18">
-              <path d="M3 15v4a2 2 0 002 2h14a2 2 0 002-2v-4M17 8l-5-5-5 5M12 3v12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-            </svg>
-          </button>
         </div>
 
         <div className="workbench-topbar-center">
-          <button className="workbench-topbar-btn" onClick={() => {
-              try {
-                const config = JSON.parse(localStorage.getItem("mdpublisher_settings") ?? "{}");
-                if (!config.aiEnabled || !config.apiKey) {
-                  setMessage("请先在设置页配置 AI 功能");
-                  return;
-                }
-              } catch { /* ignore */ }
-              alert("智能排版功能即将上线，请关注更新。");
-            }}>
+          <button className="workbench-topbar-btn" onClick={() => void handleSmartTypeset()} disabled={isTypesetting}>
             <svg viewBox="0 0 24 24" width="15" height="15">
               <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
             </svg>
-            智能排版
+            {isTypesetting ? "智能排版中..." : "智能排版"}
           </button>
-          <div className="workbench-publish-wrap">
-            <button
-              className="workbench-topbar-btn-primary"
-              onClick={() => setShowPublishMenu(!showPublishMenu)}
-            >
-              发布到草稿箱
-              <svg viewBox="0 0 24 24" width="12" height="12">
-                <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-              </svg>
-            </button>
-            {showPublishMenu && (
-              <div className="workbench-publish-dropdown">
-                <div className="workbench-publish-option" onClick={() => { setShowPublishMenu(false); navigate(`/publish?articleId=${selectedArticleId}`); }}>微信公众号</div>
-                <div className="workbench-publish-option" onClick={() => { setShowPublishMenu(false); navigate(`/publish?articleId=${selectedArticleId}`); }}>知乎专栏</div>
-                <div className="workbench-publish-option" onClick={() => { setShowPublishMenu(false); navigate(`/publish?articleId=${selectedArticleId}`); }}>简书</div>
-                <div className="workbench-publish-option" onClick={() => { setShowPublishMenu(false); navigate(`/publish?articleId=${selectedArticleId}`); }}>自定义平台</div>
-              </div>
-            )}
-          </div>
-          <button className="workbench-topbar-btn" onClick={handleCopyHtml}>一键复制</button>
+          <button className="workbench-topbar-btn" onClick={handleCopyHtml}>复制 HTML</button>
         </div>
 
         <div className="workbench-topbar-right">
-          <button className="workbench-icon-btn" title="更多">
-            <svg viewBox="0 0 24 24" width="18" height="18">
-              <path d="M4 8h16M4 16h16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" fill="none" />
-            </svg>
-          </button>
+          <span className="workbench-topbar-article">{articles.find((item) => item.id === selectedArticleId)?.title || "未选择文章"}</span>
         </div>
       </header>
 
-      <div className="workbench-body">
-        {/* Left Toolbar */}
+      <div className="workbench-body workbench-body-refined">
         <aside className="workbench-left">
-          {/* Panel Switcher */}
           <div className="workbench-panel-tabs">
             <button
               className={`workbench-panel-tab ${leftPanel === "templates" ? "active" : ""}`}
@@ -259,137 +385,124 @@ export function WorkbenchPage() {
           </div>
 
           {leftPanel === "templates" ? (
-            <div className="workbench-templates">
-              {templates.map((tpl) => (
-                <div key={tpl.id}>
-                  <div
-                    className={`workbench-template-item ${tpl.id === selectedTemplateId ? "active" : ""}`}
-                    onClick={() => void handleTemplateSwitch(tpl.id)}
-                  >
-                    <div
-                      className="workbench-template-swatch"
-                      style={{ background: tpl.id === "insight-dark" ? "#1c232b" : tpl.id === "minimal-gray" ? "#f5f5f5" : undefined }}
-                    />
-                    <span className="workbench-template-name">{tpl.name}</span>
-                    <button
-                      className="workbench-template-expand"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setExpandedTemplate(expandedTemplate === tpl.id ? null : tpl.id);
-                      }}
-                    >
-                      <svg viewBox="0 0 24 24" width="14" height="14" style={{ color: "var(--text-muted)", transform: expandedTemplate === tpl.id ? "rotate(180deg)" : undefined, transition: "transform 0.15s" }}>
-                        <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-                      </svg>
-                    </button>
-                  </div>
-                  {expandedTemplate === tpl.id && (
-                    <div className="workbench-template-details">
-                      <div className="workbench-template-detail-row">
-                        <span className="detail-label">描述</span>
-                        <span className="detail-value">{tpl.description}</span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))}
+            <div className="workbench-template-grid">
+              {templates.map((template) =>
+                renderTemplateCard(template, template.id === selectedTemplateId, () => {
+                  void handleTemplateSwitch(template.id);
+                })
+              )}
             </div>
           ) : (
             <div className="workbench-custom">
-              {/* Font Size */}
               <div className="workbench-custom-section">
                 <div className="workbench-custom-label">字号</div>
                 <div className="workbench-chip-row">
-                  {["15px", "16px", "18px"].map((s) => (
+                  {["15px", "16px", "18px"].map((size) => (
                     <button
-                      key={s}
-                      className={`workbench-chip ${fontSize === s ? "active" : ""}`}
-                      onClick={() => setFontSize(s)}
+                      key={size}
+                      className={`workbench-chip ${fontSize === size ? "active" : ""}`}
+                      onClick={() => {
+                        setFontSize(size);
+                        void triggerRender(contentInput, titleInput, authorInput, { fontSize: size });
+                      }}
                     >
-                      {s}
+                      {size}
                     </button>
                   ))}
                 </div>
               </div>
 
-              {/* Paragraph Indent */}
               <div className="workbench-custom-section">
                 <div className="workbench-custom-label">首行缩进</div>
                 <div className="workbench-chip-row">
                   <button
                     className={`workbench-chip ${paragraphIndent ? "active" : ""}`}
-                    onClick={() => setParagraphIndent(!paragraphIndent)}
+                    onClick={() => {
+                      setParagraphIndent(true);
+                      void triggerRender(contentInput, titleInput, authorInput, { paragraphIndent: true });
+                    }}
                   >
                     开启
                   </button>
                   <button
                     className={`workbench-chip ${!paragraphIndent ? "active" : ""}`}
-                    onClick={() => setParagraphIndent(false)}
+                    onClick={() => {
+                      setParagraphIndent(false);
+                      void triggerRender(contentInput, titleInput, authorInput, { paragraphIndent: false });
+                    }}
                   >
                     关闭
                   </button>
                 </div>
               </div>
 
-              {/* Spacing */}
               <div className="workbench-custom-section">
                 <div className="workbench-custom-label">段落间距</div>
                 <div className="workbench-chip-row">
-                  {(["compact", "normal", "relaxed"] as const).map((s) => (
+                  {(["compact", "normal", "relaxed"] as const).map((value) => (
                     <button
-                      key={s}
-                      className={`workbench-chip ${spacing === s ? "active" : ""}`}
-                      onClick={() => setSpacing(s)}
+                      key={value}
+                      className={`workbench-chip ${spacing === value ? "active" : ""}`}
+                      onClick={() => {
+                        setSpacing(value);
+                        void triggerRender(contentInput, titleInput, authorInput, { spacing: value });
+                      }}
                     >
-                      {s === "compact" ? "紧凑" : s === "normal" ? "适中" : "呼吸"}
+                      {value === "compact" ? "紧凑" : value === "normal" ? "适中" : "呼吸"}
                     </button>
                   ))}
                 </div>
               </div>
 
-              {/* Section Divider */}
               <div className="workbench-custom-section">
                 <div className="workbench-custom-label">章节分隔符</div>
                 <div className="workbench-chip-row">
-                  {["line", "none", "dashed", "double", "ornament"].map((s) => (
+                  {["line", "none", "dashed", "double", "ornament"].map((value) => (
                     <button
-                      key={s}
-                      className={`workbench-chip ${sectionDivider === s ? "active" : ""}`}
-                      onClick={() => setSectionDivider(s)}
+                      key={value}
+                      className={`workbench-chip ${sectionDivider === value ? "active" : ""}`}
+                      onClick={() => {
+                        setSectionDivider(value);
+                        void triggerRender(contentInput, titleInput, authorInput, { sectionDivider: value });
+                      }}
                     >
-                      {s === "line" ? "直线" : s === "none" ? "无" : s === "dashed" ? "虚线" : s === "double" ? "双线" : "花纹"}
+                      {value === "line" ? "直线" : value === "none" ? "无" : value === "dashed" ? "虚线" : value === "double" ? "双线" : "花纹"}
                     </button>
                   ))}
                 </div>
               </div>
 
-              {/* End Marker */}
               <div className="workbench-custom-section">
                 <div className="workbench-custom-label">结尾标识符</div>
                 <div className="workbench-chip-row">
-                  {["none", "end", "dot", "diamond", "dash"].map((s) => (
+                  {["none", "end", "dot", "diamond", "dash"].map((value) => (
                     <button
-                      key={s}
-                      className={`workbench-chip ${endMarker === s ? "active" : ""}`}
-                      onClick={() => setEndMarker(s)}
+                      key={value}
+                      className={`workbench-chip ${endMarker === value ? "active" : ""}`}
+                      onClick={() => {
+                        setEndMarker(value);
+                        void triggerRender(contentInput, titleInput, authorInput, { endMarker: value });
+                      }}
                     >
-                      {s === "none" ? "无" : s === "end" ? "End" : s === "dot" ? "●" : s === "diamond" ? "◆" : "—"}
+                      {value === "none" ? "无" : value === "end" ? "End" : value === "dot" ? "●" : value === "diamond" ? "◆" : "—"}
                     </button>
                   ))}
                 </div>
               </div>
 
-              {/* Text Card */}
               <div className="workbench-custom-section">
                 <div className="workbench-custom-label">文字卡片</div>
                 <div className="workbench-chip-row">
-                  {["none", "flat", "elevated", "glass"].map((s) => (
+                  {["none", "flat", "elevated", "glass"].map((value) => (
                     <button
-                      key={s}
-                      className={`workbench-chip ${textCard === s ? "active" : ""}`}
-                      onClick={() => setTextCard(s)}
+                      key={value}
+                      className={`workbench-chip ${textCard === value ? "active" : ""}`}
+                      onClick={() => {
+                        setTextCard(value);
+                        void triggerRender(contentInput, titleInput, authorInput, { textCard: value });
+                      }}
                     >
-                      {s === "none" ? "无" : s === "flat" ? "扁平" : s === "elevated" ? "悬浮" : "玻璃"}
+                      {value === "none" ? "无" : value === "flat" ? "扁平" : value === "elevated" ? "悬浮" : "玻璃"}
                     </button>
                   ))}
                 </div>
@@ -398,114 +511,163 @@ export function WorkbenchPage() {
           )}
         </aside>
 
-        {/* Center Editor */}
-        <main className="workbench-center">
-          {/* Article Selector */}
-          <div className="workbench-article-bar">
-            <select
-              className="workbench-article-select"
-              value={selectedArticleId}
-              onChange={(e) => setSelectedArticleId(e.target.value)}
-            >
-              {articles.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.title}
-                </option>
-              ))}
-            </select>
-            <button className="workbench-render-btn" onClick={() => void handleRender()} disabled={isRendering}>
-              {isRendering ? "生成中..." : "生成预览"}
-            </button>
-          </div>
-
-          {/* Metadata Row */}
+        <main className="workbench-center workbench-center-refined">
           <div className="workbench-meta-row">
             <input
               type="text"
               className="workbench-meta-input"
               placeholder="标题"
               value={titleInput}
-              onChange={(e) => setTitleInput(e.target.value)}
+              onChange={(event) => {
+                setTitleInput(event.target.value);
+                syncMetadata(event.target.value, authorInput);
+              }}
             />
             <input
               type="text"
               className="workbench-meta-input"
               placeholder="作者"
               value={authorInput}
-              onChange={(e) => setAuthorInput(e.target.value)}
+              onChange={(event) => {
+                setAuthorInput(event.target.value);
+                syncMetadata(titleInput, event.target.value);
+              }}
             />
             <button className="workbench-save-btn" onClick={() => void handleSave()} disabled={isSaving}>
               {isSaving ? "保存中..." : "保存"}
             </button>
           </div>
 
-          {/* Markdown Editor */}
-          <div className="workbench-editor">
-            <textarea
-              className="workbench-editor-textarea"
-              value={contentInput}
-              onChange={(e) => setContentInput(e.target.value)}
-              placeholder="在这里编辑 Markdown..."
+          <div
+            className="workbench-editor-surface"
+            style={{ background: selectedTemplateStyle.surface }}
+          >
+            <div className="workbench-editor-meta">
+              <div className="workbench-editor-title">{titleInput || "未命名文章"}</div>
+              <div className="workbench-editor-author">
+                <span className="workbench-editor-badge">原创</span>
+                <span>{authorInput || "未填写作者"}</span>
+              </div>
+            </div>
+            <div
+              ref={editorRef}
+              className="workbench-rich-editor"
+              contentEditable
+              suppressContentEditableWarning
+              onInput={(event) => {
+                const nextHtml = event.currentTarget.innerHTML;
+                syncContent(nextHtml);
+              }}
             />
           </div>
 
-          {/* Status Bar */}
           <div className="workbench-statusbar">
             {message && <span style={{ color: "var(--green)", fontSize: "13px" }}>{message}</span>}
             {error && <span style={{ color: "var(--red)", fontSize: "13px" }}>{error}</span>}
             {!message && !error && <span />}
             <div className="workbench-word-count">
-              {wordCount} 字 · {readTime} 分钟阅读
+              {isRendering ? "渲染中..." : `${wordCount} 字 · ${readTime} 分钟阅读`}
             </div>
           </div>
         </main>
 
-        {/* Right Preview */}
         <aside className="workbench-right">
-          {/* Undo/Redo */}
           <div className="workbench-preview-topbar">
             <div className="workbench-preview-tabs">
               <button
-                className={`workbench-preview-tab ${!showHtml ? "active" : ""}`}
-                onClick={() => setShowHtml(false)}
+                className={`workbench-preview-tab ${previewMode === "article" ? "active" : ""}`}
+                onClick={() => setPreviewMode("article")}
               >
-                排版预览
+                正文
               </button>
               <button
-                className={`workbench-preview-tab ${showHtml ? "active" : ""}`}
-                onClick={() => setShowHtml(true)}
+                className={`workbench-preview-tab ${previewMode === "feed" ? "active" : ""}`}
+                onClick={() => setPreviewMode("feed")}
+              >
+                公众号目录
+              </button>
+              <button
+                className={`workbench-preview-tab ${previewMode === "html" ? "active" : ""}`}
+                onClick={() => setPreviewMode("html")}
               >
                 HTML
               </button>
             </div>
           </div>
 
-          {/* Phone Frame */}
-          {article?.renderedHtml && !showHtml ? (
+          {article?.renderedHtml && previewMode === "article" ? (
             <div className="workbench-phone-frame">
-              <div className="workbench-phone-screen">
-                <div className="workbench-phone-content" style={previewStyle}>
-                  <div dangerouslySetInnerHTML={{ __html: article.renderedHtml }} />
+              <div className="device-frame workbench-device-frame compact-device">
+                <div className="device-hardware">
+                  <span className="device-island" />
+                  <span className="device-camera" />
                 </div>
+                <div className="device-screen">
+                  <div className="wechat-statusbar">
+                    <span>5:10</span>
+                    <span>VPN 5G 60</span>
+                  </div>
+                  <div className="wechat-nav-bar">
+                    <span className="wechat-nav-back">‹</span>
+                    <span className="wechat-nav-more">•••</span>
+                  </div>
+                  <div className="workbench-phone-content wechat-article-scroll">
+                    <div dangerouslySetInnerHTML={{ __html: article.renderedHtml }} />
+                  </div>
+                  <div className="wechat-bottom-actions">
+                    <span>Jinkin遐想</span>
+                    <span>♡ 0</span>
+                    <span>↗ 0</span>
+                    <span>□ 0</span>
+                  </div>
+                </div>
+                <div className="device-side device-side-left" />
+                <div className="device-side device-side-right" />
               </div>
             </div>
-          ) : article?.renderedHtml && showHtml ? (
+          ) : article?.renderedHtml && previewMode === "feed" ? (
+            <div className="workbench-phone-frame">
+              <div className="device-frame workbench-device-frame compact-device">
+                <div className="device-hardware">
+                  <span className="device-island" />
+                  <span className="device-camera" />
+                </div>
+                <div className="device-screen">
+                  <div className="wechat-statusbar">
+                    <span>4月2日</span>
+                    <span>目录</span>
+                  </div>
+                  <div className="workbench-feed-content">
+                    <article className="workbench-feed-card">
+                      <div className="workbench-feed-cover">
+                        {coverPreviewUrl ? (
+                          <img src={coverPreviewUrl} alt={titleInput || "封面"} />
+                        ) : (
+                          <div className="workbench-feed-cover-empty">封面待上传</div>
+                        )}
+                      </div>
+                      <div className="workbench-feed-card-body">
+                        <h3>{titleInput || "未命名文章"}</h3>
+                        <p>{digestPreview}</p>
+                        <span>{authorInput || "Jinkin遐想"} · 阅读 {Math.max(wordCount, 11)}</span>
+                      </div>
+                    </article>
+                  </div>
+                </div>
+                <div className="device-side device-side-left" />
+                <div className="device-side device-side-right" />
+              </div>
+            </div>
+          ) : article?.renderedHtml && previewMode === "html" ? (
             <pre className="workbench-html-source">{article.renderedHtml}</pre>
           ) : (
             <div className="workbench-preview-empty">
               <svg viewBox="0 0 24 24" width="40" height="40">
                 <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" stroke="var(--text-muted)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
               </svg>
-              <p>选择模板后点击"生成预览"</p>
+              <p>上传文章后会在这里实时显示排版结果</p>
             </div>
           )}
-
-          {/* Stats */}
-          <div className="workbench-preview-stats">
-            <span>{wordCount} 字</span>
-            <span>·</span>
-            <span>{readTime} 分钟阅读</span>
-          </div>
         </aside>
       </div>
     </div>

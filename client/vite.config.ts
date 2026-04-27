@@ -7,7 +7,8 @@ export default defineConfig({
     port: 5373,
     strictPort: true,
     proxy: {
-      "/api": "http://localhost:3410"
+      "/api": "http://localhost:3410",
+      "/data": "http://localhost:3410"
     }
   },
   preview: {

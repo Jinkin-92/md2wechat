@@ -11,34 +11,54 @@ const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, ""
 
 export const FALLBACK_TEMPLATES: TemplateSummary[] = [
   {
-    id: "default-light",
-    name: "雾蓝简报",
-    description: "适合理性、克制的产业观察和技术分析类文章。"
+    id: "claude",
+    name: "Claude",
+    description: "Anthropic's AI assistant. Warm terracotta accent, clean editorial layout."
   },
   {
-    id: "insight-dark",
-    name: "夜读洞察",
-    description: "适合长文评论、趋势判断和更强氛围感的阅读场景。"
+    id: "cohere",
+    name: "Cohere",
+    description: "Enterprise AI platform. Vibrant gradients, data-rich dashboard aesthetic."
   },
   {
-    id: "fresh-green",
-    name: "清新文摘",
-    description: "清新绿底，自然温暖，适合生活方式和成长随笔。"
+    id: "elevenlabs",
+    name: "ElevenLabs",
+    description: "AI voice platform. Dark cinematic UI, audio-waveform aesthetics."
   },
   {
-    id: "warm-peach",
-    name: "暖阳随笔",
-    description: "暖橙色调，温和亲切，适合生活记录和情感文字。"
+    id: "minimax",
+    name: "MiniMax",
+    description: "AI model provider. Bold dark interface with neon accents."
   },
   {
-    id: "minimal-gray",
-    name: "极简主义",
-    description: "黑白灰极简，突出内容，适合产品设计和方法论文章。"
+    id: "mistral-ai",
+    name: "Mistral AI",
+    description: "Open-weight LLM provider. French-engineered minimalism, purple-toned."
   },
   {
-    id: "sunset",
-    name: "落日暖调",
-    description: "暖红渐变，情感强烈，适合个人品牌和观点表达。"
+    id: "ollama",
+    name: "Ollama",
+    description: "Run LLMs locally. Terminal-first, monochrome simplicity."
+  },
+  {
+    id: "opencode-ai",
+    name: "OpenCode AI",
+    description: "AI coding platform. Developer-centric dark theme."
+  },
+  {
+    id: "replicate",
+    name: "Replicate",
+    description: "Run ML models via API. Clean white canvas, code-forward."
+  },
+  {
+    id: "runwayml",
+    name: "RunwayML",
+    description: "AI video generation. Cinematic dark UI, media-rich layout."
+  },
+  {
+    id: "together-ai",
+    name: "Together AI",
+    description: "Open-source AI infrastructure. Technical, blueprint-style design."
   }
 ];
 
@@ -75,6 +95,13 @@ export function buildDataFileUrl(filePath: string | null): string | null {
   return buildApiUrl(`/data/${relativePath}`);
 }
 
+export function buildArticleAssetUrl(input: {
+  storageKey: string | null;
+  localPath: string | null;
+}): string | null {
+  return buildStoredAssetUrl(input.storageKey) ?? buildDataFileUrl(input.localPath);
+}
+
 async function parseJsonResponse<T>(response: Response): Promise<T> {
   const contentType = response.headers.get("content-type") ?? "";
   const text = await response.text();
@@ -94,6 +121,17 @@ export async function getArticles(): Promise<ArticleSummary[]> {
 
   const data = await parseJsonResponse<{ items: ArticleSummary[] }>(response);
   return data.items;
+}
+
+export async function getDefaultPreviewArticle(): Promise<ArticleDetail> {
+  const response = await fetch(buildApiUrl("/api/articles/default-preview"));
+  const payload = await parseJsonResponse<ArticleDetail | { error: string }>(response);
+
+  if (!response.ok || "error" in payload) {
+    throw new Error("error" in payload ? payload.error : "默认预览文章加载失败。");
+  }
+
+  return payload;
 }
 
 export async function getTemplates(): Promise<TemplateSummary[]> {
@@ -160,7 +198,18 @@ export async function uploadArticleAsset(input: {
   return payload;
 }
 
-export async function renderArticle(articleId: string, templateId: string): Promise<ArticleDetail> {
+export async function renderArticle(
+  articleId: string,
+  templateId: string,
+  customOptions?: {
+    fontSize?: string;
+    lineHeight?: string;
+    paragraphIndent?: boolean;
+    sectionDivider?: string;
+    endMarker?: string;
+    textCard?: string;
+  }
+): Promise<ArticleDetail> {
   const response = await fetch(buildApiUrl("/api/articles/render"), {
     method: "POST",
     headers: {
@@ -168,7 +217,8 @@ export async function renderArticle(articleId: string, templateId: string): Prom
     },
     body: JSON.stringify({
       articleId,
-      templateId
+      templateId,
+      customOptions
     })
   });
 
@@ -177,6 +227,19 @@ export async function renderArticle(articleId: string, templateId: string): Prom
     throw new Error("error" in payload ? payload.error : "渲染失败。");
   }
 
+  return payload;
+}
+
+export async function updateArticleContent(articleId: string, rawMarkdown: string): Promise<ArticleDetail> {
+  const response = await fetch(buildApiUrl(`/api/articles/${articleId}/content`), {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ rawMarkdown })
+  });
+  const payload = await parseJsonResponse<ArticleDetail | { error: string }>(response);
+  if (!response.ok || "error" in payload) {
+    throw new Error("error" in payload ? payload.error : "内容更新失败。");
+  }
   return payload;
 }
 
@@ -314,6 +377,49 @@ export async function refreshPublishAccount(accountId: string): Promise<{
   >(response);
   if (!response.ok || "error" in payload) {
     throw new Error("error" in payload ? payload.error : "刷新账号状态失败。");
+  }
+
+  return payload;
+}
+
+export async function testAiConnection(input: {
+  apiUrl: string;
+  apiKey: string;
+  model: string;
+}): Promise<{ message: string }> {
+  const response = await fetch(buildApiUrl("/api/ai/test"), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(input)
+  });
+
+  const payload = await parseJsonResponse<{ message: string } | { error: string }>(response);
+  if (!response.ok || "error" in payload) {
+    throw new Error("error" in payload ? payload.error : "连接测试失败。");
+  }
+
+  return payload;
+}
+
+export async function applySmartTypesetting(input: {
+  articleId: string;
+  apiUrl: string;
+  apiKey: string;
+  model: string;
+}): Promise<ArticleDetail> {
+  const response = await fetch(buildApiUrl("/api/ai/typeset"), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(input)
+  });
+
+  const payload = await parseJsonResponse<ArticleDetail | { error: string }>(response);
+  if (!response.ok || "error" in payload) {
+    throw new Error("error" in payload ? payload.error : "智能排版失败。");
   }
 
   return payload;

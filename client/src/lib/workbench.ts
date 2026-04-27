@@ -10,7 +10,7 @@ export type WorkbenchState = {
 
 const defaultWorkbenchState: WorkbenchState = {
   selectedArticleId: "",
-  selectedTemplateId: "default-light",
+  selectedTemplateId: "claude",
   previewMode: "preview"
 };
 

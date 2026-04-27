@@ -1,6 +1,7 @@
 import type { ArticleMediaAssets } from "../shared/types.js";
 import { getStoredAssetPublicUrl } from "../storage/articles.js";
 import { getTemplateById } from "./templates.js";
+import type { TemplateDefinition } from "./templates.js";
 
 function addStyleToTag(html: string, tagName: string, style: string): string {
   const pattern = new RegExp(`<${tagName}(\\s[^>]*)?>`, "g");
@@ -43,50 +44,155 @@ function injectMediaSlots(html: string, mediaAssets: ArticleMediaAssets): string
   }, html);
 }
 
+function buildBlockquoteStyle(tokens: TemplateDefinition["tokens"]): string {
+  const base = `margin:20px 0;padding:16px 18px;background:${tokens.quoteBackground};color:${tokens.blockquoteTextColor};`;
+  switch (tokens.blockquoteStyle) {
+    case "left-border":
+      return `${base}border-left:4px solid ${tokens.accentColor};border-radius:0 14px 14px 0;`;
+    case "background":
+      return `${base}border:1px solid ${tokens.borderColor};border-left:4px solid ${tokens.accentColor};border-radius:8px;`;
+    case "italic":
+      return `${base}border:none;font-style:italic;`;
+    case "double-border":
+      return `${base}border-left:6px double ${tokens.accentColor};border-radius:0;`;
+    case "none":
+      return `${base}border:none;`;
+    default:
+      return `${base}border-left:4px solid ${tokens.accentColor};border-radius:0 14px 14px 0;`;
+  }
+}
+
+function buildHrStyle(tokens: TemplateDefinition["tokens"], styleOverride?: string): string {
+  switch (styleOverride ?? tokens.hrStyle) {
+    case "line":
+      return `margin:${tokens.sectionMargin};border:none;border-top:1px solid ${tokens.borderColor};`;
+    case "dashed":
+      return `margin:${tokens.sectionMargin};border:none;border-top:2px dashed ${tokens.borderColor};`;
+    case "double":
+      return `margin:${tokens.sectionMargin};border:none;border-top:3px double ${tokens.borderColor};`;
+    case "ornament":
+      return `margin:${tokens.sectionMargin};border:none;border-top:1px solid ${tokens.borderColor};text-align:center;`;
+    case "gradient":
+      return `margin:${tokens.sectionMargin};border:none;height:2px;background:linear-gradient(90deg,transparent,${tokens.accentColor},transparent);`;
+    case "space":
+      return `margin:40px 0;border:none;height:1px;`;
+    default:
+      return `margin:${tokens.sectionMargin};border:none;border-top:1px solid ${tokens.borderColor};`;
+  }
+}
+
+function buildListStyle(tokens: TemplateDefinition["tokens"]): string {
+  switch (tokens.listStyle) {
+    case "disc":
+      return `list-style-type:disc;`;
+    case "circle":
+      return `list-style-type:circle;`;
+    case "square":
+      return `list-style-type:square;`;
+    case "none":
+      return `list-style-type:none;`;
+    default:
+      return `list-style-type:disc;`;
+  }
+}
+
+export type CustomRenderOptions = {
+  fontSize?: string;
+  lineHeight?: string;
+  paragraphIndent?: boolean;
+  sectionDivider?: string;
+  endMarker?: string;
+  textCard?: string;
+};
+
+export type ArticleRenderMeta = {
+  title?: string;
+  author?: string;
+  digest?: string;
+};
+
+function buildEndMarker(marker: string | undefined, tokens: TemplateDefinition["tokens"]): string {
+  switch (marker) {
+    case "end":
+      return `<section data-codex-end-marker="true" style="margin:34px 0 8px;text-align:center;color:${tokens.mutedColor};font-size:12px;letter-spacing:0.2em;font-family:${tokens.fontFamily};">END</section>`;
+    case "dot":
+      return `<section data-codex-end-marker="true" style="margin:34px 0 8px;text-align:center;color:${tokens.accentColor};font-size:18px;">●</section>`;
+    case "diamond":
+      return `<section data-codex-end-marker="true" style="margin:34px 0 8px;text-align:center;color:${tokens.accentColor};font-size:18px;">◆</section>`;
+    case "dash":
+      return `<section data-codex-end-marker="true" style="margin:34px 0 8px;text-align:center;color:${tokens.mutedColor};font-size:18px;">—</section>`;
+    default:
+      return "";
+  }
+}
+
+function applyTextCard(html: string, cardStyle: string | undefined, tokens: TemplateDefinition["tokens"]): string {
+  if (!cardStyle || cardStyle === "none") {
+    return html;
+  }
+
+  const styleMap: Record<string, string> = {
+    flat: `background:${tokens.quoteBackground};border:1px solid ${tokens.borderColor};border-radius:16px;padding:14px 16px;`,
+    elevated: `background:${tokens.cardBackground};border:1px solid ${tokens.borderColor};border-radius:18px;padding:15px 17px;box-shadow:0 10px 28px rgba(15,23,42,0.12);`,
+    glass: `background:rgba(255,255,255,0.64);border:1px solid rgba(148,163,184,0.28);border-radius:18px;padding:15px 17px;box-shadow:0 12px 32px rgba(15,23,42,0.1);backdrop-filter:blur(12px);`
+  };
+  const cardRule = styleMap[cardStyle] ?? styleMap.flat;
+
+  return html.replace(/<p(\s[^>]*)? style="([^"]*)"([^>]*)>/g, (_match, before = "", style = "", after = "") => {
+    return `<p${before} style="${style}${cardRule}"${after}>`;
+  });
+}
+
 export function injectTemplateTokens(
   html: string,
   templateId: string,
-  mediaAssets?: ArticleMediaAssets
+  mediaAssets?: ArticleMediaAssets,
+  customOptions?: CustomRenderOptions,
+  meta?: ArticleRenderMeta
 ): string {
   const template = getTemplateById(templateId);
   const { tokens } = template;
+
+  // Merge custom options with template tokens
+  const effectiveFontSize = customOptions?.fontSize ?? tokens.fontSize;
+  const effectiveLineHeight = customOptions?.lineHeight ?? tokens.lineHeight;
 
   let styledHtml = mediaAssets ? injectMediaSlots(html, mediaAssets) : html;
 
   styledHtml = addStyleToTag(
     styledHtml,
     "h1",
-    `margin:0 0 20px;font-size:${tokens.h1Size};line-height:1.35;color:${tokens.headingColor};font-weight:700;`
+    `margin:0 0 ${tokens.h1MarginBottom};font-size:${tokens.h1Size};line-height:1.3;color:${tokens.headingColor};font-weight:700;font-family:${tokens.h1FontFamily};`
   );
   styledHtml = addStyleToTag(
     styledHtml,
     "h2",
-    `margin:32px 0 14px;padding-left:12px;border-left:4px solid ${tokens.accentColor};font-size:${tokens.h2Size};line-height:1.4;color:${tokens.headingColor};font-weight:700;`
+    `margin:${tokens.h2MarginTop} 0 ${tokens.h2MarginBottom};padding-left:12px;border-left:4px solid ${tokens.accentColor};font-size:${tokens.h2Size};line-height:1.4;color:${tokens.headingColor};font-weight:700;font-family:${tokens.h2FontFamily};`
   );
   styledHtml = addStyleToTag(
     styledHtml,
     "h3",
-    `margin:24px 0 12px;font-size:${tokens.h3Size};line-height:1.45;color:${tokens.headingColor};font-weight:700;`
+    `margin:${tokens.h3MarginTop} 0 ${tokens.h3MarginBottom};font-size:${tokens.h3Size};line-height:1.4;color:${tokens.headingColor};font-weight:600;font-family:${tokens.h3FontFamily};`
   );
   styledHtml = addStyleToTag(
     styledHtml,
     "p",
-    `margin:0 0 16px;font-size:${tokens.fontSize};line-height:${tokens.lineHeight};color:${tokens.textColor};`
+    `margin:${tokens.paragraphMargin};font-size:${effectiveFontSize};line-height:${effectiveLineHeight};color:${tokens.textColor};font-family:${tokens.fontFamily};${customOptions?.paragraphIndent ? "text-indent:2em;" : ""}`
   );
   styledHtml = addStyleToTag(
     styledHtml,
     "blockquote",
-    `margin:20px 0;padding:16px 18px;border-left:4px solid ${tokens.accentColor};background:${tokens.quoteBackground};border-radius:0 14px 14px 0;color:${tokens.textColor};`
+    buildBlockquoteStyle(tokens)
   );
   styledHtml = addStyleToTag(
     styledHtml,
     "ul",
-    `margin:0 0 16px;padding-left:22px;color:${tokens.textColor};`
+    `margin:${tokens.paragraphMargin};padding-left:22px;${buildListStyle(tokens)}color:${tokens.textColor};`
   );
   styledHtml = addStyleToTag(
     styledHtml,
     "ol",
-    `margin:0 0 16px;padding-left:22px;color:${tokens.textColor};`
+    `margin:${tokens.paragraphMargin};padding-left:22px;color:${tokens.textColor};`
   );
   styledHtml = addStyleToTag(
     styledHtml,
@@ -96,27 +202,28 @@ export function injectTemplateTokens(
   styledHtml = addStyleToTag(
     styledHtml,
     "pre",
-    `margin:18px 0;padding:16px;border-radius:16px;background:${tokens.codeBackground};overflow:auto;color:${tokens.textColor};`
+    `margin:18px 0;padding:16px;border-radius:${tokens.codeBorderRadius};background:${tokens.codeBackground};overflow:auto;color:${tokens.codeTextColor};font-family:${tokens.fontFamilyMono};`
   );
   styledHtml = addStyleToTag(
     styledHtml,
     "code",
-    `font-family:Consolas,'SFMono-Regular',monospace;font-size:14px;`
+    `font-family:${tokens.fontFamilyMono};font-size:14px;color:${tokens.codeTextColor};`
   );
   styledHtml = addStyleToTag(
     styledHtml,
     "a",
-    `color:${tokens.accentColor};text-decoration:none;border-bottom:1px solid ${tokens.accentColor};`
+    `color:${tokens.accentColor};text-decoration:none;`
   );
   styledHtml = addStyleToTag(
     styledHtml,
     "hr",
-    `margin:28px 0;border:none;border-top:1px solid ${tokens.borderColor};`
+    buildHrStyle(tokens, customOptions?.sectionDivider)
   );
+  styledHtml = applyTextCard(styledHtml, customOptions?.textCard, tokens);
   styledHtml = addStyleToTag(
     styledHtml,
     "table",
-    `width:100%;margin:18px 0;border-collapse:collapse;border-spacing:0;overflow:hidden;border-radius:14px;border:1px solid ${tokens.borderColor};`
+    `width:100%;margin:18px 0;border-collapse:collapse;border-spacing:0;table-layout:auto;display:block;overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:14px;border:1px solid ${tokens.borderColor};background:${tokens.cardBackground};`
   );
   styledHtml = addStyleToTag(
     styledHtml,
@@ -126,7 +233,7 @@ export function injectTemplateTokens(
   styledHtml = addStyleToTag(
     styledHtml,
     "td",
-    `padding:10px 12px;border:1px solid ${tokens.borderColor};font-size:14px;color:${tokens.textColor};vertical-align:top;`
+    `padding:10px 12px;border:1px solid ${tokens.borderColor};font-size:14px;color:${tokens.textColor};vertical-align:top;min-width:92px;word-break:break-word;`
   );
   styledHtml = addStyleToTag(
     styledHtml,
@@ -134,11 +241,30 @@ export function injectTemplateTokens(
     `color:${tokens.headingColor};font-weight:700;`
   );
 
+  const author = meta?.author?.trim() || "Jinkin";
+  const title = meta?.title?.trim() || "";
+  const metaBlock = title
+      ? `<section data-codex-meta="true" style="margin:0 0 28px;padding-bottom:18px;border-bottom:4px solid ${tokens.headingColor};font-family:${tokens.fontFamily};">
+<h1 style="margin:0 0 18px;font-size:30px;line-height:1.25;color:${tokens.headingColor};font-weight:500;font-family:${tokens.h1FontFamily};">${escapeHtml(title)}</h1>
+<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:14px;line-height:1.6;color:${tokens.mutedColor};">
+<span style="display:inline-flex;align-items:center;padding:2px 8px;border-radius:4px;background:#f2f2f2;color:#8a8a8a;">原创</span>
+<span>${escapeHtml(author)}</span>
+<span style="color:#576174;">Jinkin遐想</span>
+<span>2026年4月2日 08:39</span>
+</div>
+<div style="margin-top:8px;font-size:14px;color:${tokens.mutedColor};display:flex;gap:14px;align-items:center;">
+<span>四川</span><span>🎧 听全文</span>
+</div>
+</section>`
+      : "";
+
   return [
     `<!-- template:${template.id} -->`,
-    `<article style="background:${tokens.cardBackground};color:${tokens.textColor};font-size:${tokens.fontSize};line-height:${tokens.lineHeight};padding:28px 22px;border-radius:24px;border:1px solid ${tokens.borderColor};box-shadow:0 12px 30px rgba(15,23,42,0.08);">`,
+    `<article style="background:${tokens.cardBackground};color:${tokens.textColor};font-size:${tokens.fontSize};line-height:${tokens.lineHeight};padding:28px 22px;border-radius:${tokens.cardRadius};border:1px solid ${tokens.borderColor};box-shadow:${tokens.cardShadow};font-family:${tokens.fontFamily};">`,
+    metaBlock,
     styledHtml,
-    `<footer style="margin-top:28px;padding-top:16px;border-top:1px solid ${tokens.borderColor};font-size:12px;color:${tokens.mutedColor};">模板：${template.name}</footer>`,
+    buildEndMarker(customOptions?.endMarker, tokens),
+    `<footer style="margin-top:28px;padding-top:16px;border-top:1px solid ${tokens.borderColor};font-size:12px;color:${tokens.mutedColor};font-family:${tokens.fontFamily};">模板：${template.name}</footer>`,
     "</article>"
   ].join("\n");
 }
