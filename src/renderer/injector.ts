@@ -3,6 +3,75 @@ import { getStoredAssetPublicUrl } from "../storage/articles.js";
 import { getTemplateById } from "./templates.js";
 import type { TemplateDefinition } from "./templates.js";
 
+function replaceBase64ImagesWithPlaceholders(html: string, mediaAssets: ArticleMediaAssets): string {
+  let imageIndex = 0;
+  const bodyImages = mediaAssets.bodyImages;
+  const bodyImageCount = bodyImages.length;
+  let result = html;
+  let searchStart = 0;
+  while (true) {
+    const imgStart = result.toLowerCase().indexOf("<img", searchStart);
+    if (imgStart === -1) break;
+    const imgEnd = result.indexOf(">", imgStart);
+    if (imgEnd === -1) break;
+    const imgTag = result.substring(imgStart, imgEnd + 1);
+    if (!imgTag.includes("data:image") || !imgTag.includes("base64")) {
+      searchStart = imgStart + 4;
+      continue;
+    }
+    if (imageIndex >= bodyImageCount) {
+      searchStart = imgEnd + 1;
+      continue;
+    }
+    const slot = bodyImages[imageIndex];
+    imageIndex++;
+    const previewUrl = getStoredAssetPublicUrl(slot.storageKey);
+    const placeholder = slot.placeholder || slot.label || "image";
+    let replacement;
+    if (previewUrl) {
+      replacement =
+        "<figure data-codex-media-slot=\"" +
+        slot.id +
+        "\" data-codex-media-marker=\"" +
+        slot.markerToken +
+        "\" style=\"margin:24px 0;\"><img src=\"" +
+        previewUrl +
+        "\" alt=\"" +
+        placeholder +
+        "\" style=\"display:block;width:100%;border-radius:18px;border:1px solid rgba(15,23,42,0.08);\" /><figcaption style=\"margin-top:10px;font-size:12px;color:#64748b;text-align:center;\">" +
+        placeholder +
+        "</figcaption></figure>";
+    } else {
+      replacement =
+        "<figure data-codex-media-slot=\"" +
+        slot.id +
+        "\" data-codex-media-marker=\"" +
+        slot.markerToken +
+        "\" style=\"margin:24px 0;\"><div data-codex-empty-image=\"true\" style=\"display:flex;align-items:center;justify-content:center;min-height:180px;border:1px dashed rgba(15,23,42,0.24);border-radius:18px;background:rgba(148,163,184,0.08);color:#475569;font-size:14px;padding:24px;text-align:center;\">Please upload image for " +
+        placeholder +
+        "</div><figcaption style=\"margin-top:10px;font-size:12px;color:#64748b;text-align:center;\">" +
+        placeholder +
+        "</figcaption></figure>";
+    }
+    const pBeforeMatch = result.lastIndexOf("<p", imgStart);
+    let replaceStart = imgStart;
+    let replaceEnd = imgEnd + 1;
+    if (pBeforeMatch !== -1 && pBeforeMatch < imgStart) {
+      const textBetweenPAndImg = result.substring(pBeforeMatch + 2, imgStart).trim();
+      if (textBetweenPAndImg === "") {
+        const pTagEnd = result.indexOf(">", pBeforeMatch);
+        if (pTagEnd !== -1 && pTagEnd < imgEnd) {
+          replaceStart = pBeforeMatch;
+          replaceEnd = pTagEnd + 1;
+        }
+      }
+    }
+    result = result.substring(0, replaceStart) + replacement + result.substring(replaceEnd);
+    searchStart = replaceStart + replacement.length;
+  }
+  return result;
+}
+
 function addStyleToTag(html: string, tagName: string, style: string): string {
   const pattern = new RegExp(`<${tagName}(\\s[^>]*)?>`, "g");
 
@@ -31,8 +100,8 @@ function injectMediaSlots(html: string, mediaAssets: ArticleMediaAssets): string
       `<figure data-codex-media-slot="${slot.id}" data-codex-media-marker="${slot.markerToken}" style="margin:24px 0;">`,
       previewUrl
         ? `<img src="${previewUrl}" alt="${escapeHtml(slot.label)}" data-codex-preview-image="true" style="display:block;width:100%;border-radius:18px;border:1px solid rgba(15,23,42,0.08);" />`
-        : `<div data-codex-empty-image="true" style="display:flex;align-items:center;justify-content:center;min-height:180px;border:1px dashed rgba(15,23,42,0.24);border-radius:18px;background:rgba(148,163,184,0.08);color:#475569;font-size:14px;padding:24px;text-align:center;">请在预览页为 ${escapeHtml(slot.label)} 上传图片</div>`,
-      `<figcaption style="margin-top:10px;font-size:12px;color:#64748b;text-align:center;">${escapeHtml(slot.placeholder || `图片位 ${index + 1}`)}</figcaption>`,
+        : `<div data-codex-empty-image="true" style="display:flex;align-items:center;justify-content:center;min-height:180px;border:1px dashed rgba(15,23,42,0.24);border-radius:18px;background:rgba(148,163,184,0.08);color:#475569;font-size:14px;padding:24px;text-align:center;">Please upload image for ${escapeHtml(slot.label)}</div>`,
+      `<figcaption style="margin-top:10px;font-size:12px;color:#64748b;text-align:center;">${escapeHtml(slot.placeholder || `Image slot ${index + 1}`)}</figcaption>`,
       "</figure>"
     ].join("");
 
@@ -71,11 +140,13 @@ function buildHrStyle(tokens: TemplateDefinition["tokens"], styleOverride?: stri
     case "double":
       return `margin:${tokens.sectionMargin};border:none;border-top:3px double ${tokens.borderColor};`;
     case "ornament":
-      return `margin:${tokens.sectionMargin};border:none;border-top:1px solid ${tokens.borderColor};text-align:center;`;
+      return `margin:${tokens.sectionMargin};border:none;border-top:2px solid ${tokens.borderColor};text-align:center;position:relative;`;
     case "gradient":
       return `margin:${tokens.sectionMargin};border:none;height:2px;background:linear-gradient(90deg,transparent,${tokens.accentColor},transparent);`;
     case "space":
       return `margin:40px 0;border:none;height:1px;`;
+    case "none":
+      return `margin:${tokens.sectionMargin};border:none;`;
     default:
       return `margin:${tokens.sectionMargin};border:none;border-top:1px solid ${tokens.borderColor};`;
   }
@@ -100,15 +171,19 @@ export type CustomRenderOptions = {
   fontSize?: string;
   lineHeight?: string;
   paragraphIndent?: boolean;
+  paragraphMargin?: string;
   sectionDivider?: string;
   endMarker?: string;
-  textCard?: string;
+  platformName?: string;
+  originalChecked?: boolean;
 };
 
 export type ArticleRenderMeta = {
   title?: string;
   author?: string;
   digest?: string;
+  platformName?: string;
+  originalChecked?: boolean;
 };
 
 function buildEndMarker(marker: string | undefined, tokens: TemplateDefinition["tokens"]): string {
@@ -153,11 +228,12 @@ export function injectTemplateTokens(
   const template = getTemplateById(templateId);
   const { tokens } = template;
 
-  // Merge custom options with template tokens
   const effectiveFontSize = customOptions?.fontSize ?? tokens.fontSize;
   const effectiveLineHeight = customOptions?.lineHeight ?? tokens.lineHeight;
+  const effectiveParagraphMargin = customOptions?.paragraphMargin ?? tokens.paragraphMargin;
 
-  let styledHtml = mediaAssets ? injectMediaSlots(html, mediaAssets) : html;
+  let styledHtml = mediaAssets ? replaceBase64ImagesWithPlaceholders(html, mediaAssets) : html;
+  styledHtml = mediaAssets ? injectMediaSlots(styledHtml, mediaAssets) : html;
 
   styledHtml = addStyleToTag(
     styledHtml,
@@ -177,7 +253,7 @@ export function injectTemplateTokens(
   styledHtml = addStyleToTag(
     styledHtml,
     "p",
-    `margin:${tokens.paragraphMargin};font-size:${effectiveFontSize};line-height:${effectiveLineHeight};color:${tokens.textColor};font-family:${tokens.fontFamily};${customOptions?.paragraphIndent ? "text-indent:2em;" : ""}`
+    `margin:${effectiveParagraphMargin};font-size:${effectiveFontSize};line-height:${effectiveLineHeight};color:${tokens.textColor};font-family:${tokens.fontFamily};${customOptions?.paragraphIndent ? "text-indent:2em;" : ""}`
   );
   styledHtml = addStyleToTag(
     styledHtml,
@@ -219,7 +295,6 @@ export function injectTemplateTokens(
     "hr",
     buildHrStyle(tokens, customOptions?.sectionDivider)
   );
-  styledHtml = applyTextCard(styledHtml, customOptions?.textCard, tokens);
   styledHtml = addStyleToTag(
     styledHtml,
     "table",
@@ -242,18 +317,18 @@ export function injectTemplateTokens(
   );
 
   const author = meta?.author?.trim() || "Jinkin";
+  const platformName = (customOptions?.platformName ?? meta?.platformName)?.trim() || "";
+  const originalChecked = customOptions?.originalChecked ?? meta?.originalChecked ?? false;
   const title = meta?.title?.trim() || "";
+  const todayStr = new Date().toLocaleDateString("zh-CN", { year: "numeric", month: "long", day: "numeric" });
   const metaBlock = title
       ? `<section data-codex-meta="true" style="margin:0 0 28px;padding-bottom:18px;border-bottom:4px solid ${tokens.headingColor};font-family:${tokens.fontFamily};">
 <h1 style="margin:0 0 18px;font-size:30px;line-height:1.25;color:${tokens.headingColor};font-weight:500;font-family:${tokens.h1FontFamily};">${escapeHtml(title)}</h1>
 <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:14px;line-height:1.6;color:${tokens.mutedColor};">
-<span style="display:inline-flex;align-items:center;padding:2px 8px;border-radius:4px;background:#f2f2f2;color:#8a8a8a;">原创</span>
+${originalChecked ? '<span style="display:inline-flex;align-items:center;padding:2px 8px;border-radius:4px;background:#f2f2f2;color:#8a8a8a;">Original</span>' : ""}
 <span>${escapeHtml(author)}</span>
-<span style="color:#576174;">Jinkin遐想</span>
-<span>2026年4月2日 08:39</span>
-</div>
-<div style="margin-top:8px;font-size:14px;color:${tokens.mutedColor};display:flex;gap:14px;align-items:center;">
-<span>四川</span><span>🎧 听全文</span>
+${platformName ? `<span style="color:#576174;">${escapeHtml(platformName)}</span>` : ""}
+<span>${todayStr}</span>
 </div>
 </section>`
       : "";
@@ -264,7 +339,7 @@ export function injectTemplateTokens(
     metaBlock,
     styledHtml,
     buildEndMarker(customOptions?.endMarker, tokens),
-    `<footer style="margin-top:28px;padding-top:16px;border-top:1px solid ${tokens.borderColor};font-size:12px;color:${tokens.mutedColor};font-family:${tokens.fontFamily};">模板：${template.name}</footer>`,
+    `<footer style="margin-top:28px;padding-top:16px;border-top:1px solid ${tokens.borderColor};font-size:12px;color:${tokens.mutedColor};font-family:${tokens.fontFamily};">Template: ${template.name}</footer>`,
     "</article>"
   ].join("\n");
 }
