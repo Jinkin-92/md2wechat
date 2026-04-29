@@ -140,38 +140,26 @@ router.post("/typeset", async (req, res) => {
     return res.status(404).json({ error: "未找到对应的文章。" });
   }
 
-  const MAX_CHARS = 20000;
-  const rawMarkdown = article.rawMarkdown;
-  const needsTruncation = rawMarkdown.length > MAX_CHARS;
-  const markdownToSend = needsTruncation ? rawMarkdown.slice(0, MAX_CHARS) : rawMarkdown;
-
-  if (needsTruncation) {
-    console.warn(`Article ${articleId} markdown too long (${rawMarkdown.length} chars), truncated to ${MAX_CHARS} chars for AI typesetting.`);
-  }
-
   try {
     const responseText = await callAnthropicCompatible({
       apiUrl,
       apiKey,
       model,
       system:
-        "You are a Chinese WeChat article editor. Optimize readability, preserve all content exactly. Return strict JSON with keys markdown and digest.",
+        "You are a Chinese WeChat article editor. Improve readability and structure, but do not fabricate facts. Keep the author's viewpoint, headings, tables, image placeholders and data unchanged. Return strict JSON with keys markdown and digest.",
       prompt: [
         "请对下面这篇中文文章做公众号智能排版优化。",
-        "严格要求：",
-        "1. 原文每一段都是段就保持为段，不要合并或拆分为多段，不要把段落转成表格。",
-        "2. 表格请原样保留，不要把表格转换成段落或列表。",
-        "3. 图片占位符如【此处插入...】必须原样保留在正文中，不得删除、不得改写。",
-        "4. 标题结构必须原样保留，不得改变层级。",
-        "5. 事实、数据、专业术语必须原样保留，不得修改。",
-        "6. 只做小幅优化：调整段内语句通顺性、增加过渡词、修正错别字。",
-        "7. digest 输出为 40-80 字中文摘要。",
-        "8. markdown 字段返回完整 Markdown 正文，不要代码块包裹。",
+        "要求：",
+        "1. 保留事实、数据、表格、标题结构、图片占位符原文。",
+        "2. 可以优化段落切分、强调、引导语和小标题过渡。",
+        "3. 不得删除图片占位符，如【此处插入...】。",
+        "4. digest 输出为 40-80 字中文摘要。",
+        "5. markdown 字段返回完整 Markdown 正文，不要加代码块。",
         "",
         `标题：${article.title}`,
         `作者：${article.metadata.author || "未填写"}`,
         "",
-        markdownToSend
+        article.rawMarkdown
       ].join("\n"),
       maxTokens: 3200
     });
