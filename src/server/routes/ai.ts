@@ -85,6 +85,25 @@ async function callAnthropicCompatible(input: {
   return text;
 }
 
+function stripBase64Images(markdown: string): string {
+  const bodyImages = [
+    { alt: "封面图" },
+    { alt: "图片1" }, { alt: "图片2" }, { alt: "图片3" },
+    { alt: "图片4" }, { alt: "图片5" }, { alt: "图片6" }
+  ];
+  let imageIndex = 0;
+  const getNextPlaceholder = (): string => {
+    const name = bodyImages[imageIndex]?.alt ?? `图片${imageIndex + 1}`;
+    imageIndex++;
+    return `【此处插入${name}】`;
+  };
+  // Replace <p><img ...base64...></p> blocks with placeholder text
+  let result = markdown.replace(/<p[^>]*>\s*<img[^>]*base64[^>]*>\s*<\/p>/gi, () => `\n\n${getNextPlaceholder()}\n\n`);
+  // Replace standalone <img ...base64...> tags
+  result = result.replace(/<img[^>]*base64[^>]*\/?>/gi, () => `\n\n${getNextPlaceholder()}\n\n`);
+  return result;
+}
+
 function extractJsonBlock(text: string): { markdown?: string; digest?: string } {
   const match = text.match(/\{[\s\S]*\}/);
   if (!match) {
@@ -141,6 +160,7 @@ router.post("/typeset", async (req, res) => {
   }
 
   try {
+    const markdownForAi = stripBase64Images(article.rawMarkdown);
     const responseText = await callAnthropicCompatible({
       apiUrl,
       apiKey,
@@ -150,18 +170,18 @@ router.post("/typeset", async (req, res) => {
       prompt: [
         "请对下面这篇中文文章做公众号智能排版优化。",
         "要求：",
-        "1. 保留事实、数据、表格、标题结构、图片占位符原文。",
+        "1. 保留事实、数据、表格、标题结构原文。",
         "2. 可以优化段落切分、强调、引导语和小标题过渡。",
-        "3. 不得删除图片占位符，如【此处插入...】。",
+        "3. 【此处插入...】标记为图片占位符，必须原样保留，不得删除或改写。",
         "4. digest 输出为 40-80 字中文摘要。",
         "5. markdown 字段返回完整 Markdown 正文，不要加代码块。",
         "",
         `标题：${article.title}`,
         `作者：${article.metadata.author || "未填写"}`,
         "",
-        article.rawMarkdown
+        markdownForAi
       ].join("\n"),
-      maxTokens: 3200
+      maxTokens: 4000
     });
 
     const parsed = extractJsonBlock(responseText);

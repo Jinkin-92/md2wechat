@@ -4,12 +4,16 @@ export type AppSettings = {
   apiUrl: string;
   apiKey: string;
   model: string;
+  platformName: string;
+  originalChecked: boolean;
 };
 
 export const DEFAULT_SETTINGS: AppSettings = {
-  apiUrl: "https://api.minimaxi.com/anthropic",
+  apiUrl: "https://token-plan-cn.xiaomimimo.com/anthropic",
   apiKey: "",
-  model: "MiniMax-M2.7"
+  model: "mimo-v2.5",
+  platformName: "",
+  originalChecked: false
 };
 
 export function readAppSettings(): AppSettings {
@@ -27,7 +31,9 @@ export function readAppSettings(): AppSettings {
     return {
       apiUrl: parsed.apiUrl ?? DEFAULT_SETTINGS.apiUrl,
       apiKey: parsed.apiKey ?? DEFAULT_SETTINGS.apiKey,
-      model: parsed.model ?? DEFAULT_SETTINGS.model
+      model: parsed.model ?? DEFAULT_SETTINGS.model,
+      platformName: parsed.platformName ?? DEFAULT_SETTINGS.platformName,
+      originalChecked: parsed.originalChecked ?? DEFAULT_SETTINGS.originalChecked
     };
   } catch {
     return DEFAULT_SETTINGS;

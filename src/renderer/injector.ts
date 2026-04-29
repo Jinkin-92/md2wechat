@@ -94,16 +94,10 @@ function escapeHtml(value: string): string {
 }
 
 function injectMediaSlots(html: string, mediaAssets: ArticleMediaAssets): string {
-  return mediaAssets.bodyImages.reduce((currentHtml, slot, index) => {
+  // First pass: match generic placeholders like <p>【图片 1】</p>
+  let result = mediaAssets.bodyImages.reduce((currentHtml, slot) => {
     const previewUrl = getStoredAssetPublicUrl(slot.storageKey);
-    const figure = [
-      `<figure data-codex-media-slot="${slot.id}" data-codex-media-marker="${slot.markerToken}" style="margin:24px 0;">`,
-      previewUrl
-        ? `<img src="${previewUrl}" alt="${escapeHtml(slot.label)}" data-codex-preview-image="true" style="display:block;width:100%;border-radius:18px;border:1px solid rgba(15,23,42,0.08);" />`
-        : `<div data-codex-empty-image="true" style="display:flex;align-items:center;justify-content:center;min-height:180px;border:1px dashed rgba(15,23,42,0.24);border-radius:18px;background:rgba(148,163,184,0.08);color:#475569;font-size:14px;padding:24px;text-align:center;">Please upload image for ${escapeHtml(slot.label)}</div>`,
-      `<figcaption style="margin-top:10px;font-size:12px;color:#64748b;text-align:center;">${escapeHtml(slot.placeholder || `Image slot ${index + 1}`)}</figcaption>`,
-      "</figure>"
-    ].join("");
+    const figure = buildFigure(slot, previewUrl);
 
     return currentHtml
       .split(`<p>${slot.placeholder}</p>`)
@@ -111,6 +105,33 @@ function injectMediaSlots(html: string, mediaAssets: ArticleMediaAssets): string
       .split(`<p><em>${slot.placeholder}</em></p>`)
       .join(figure);
   }, html);
+
+  // Second pass: replace ALL 【此处插入...】 markers regardless of context
+  // These can appear inside <p> tags, between block elements, or as standalone text
+  let slotIndex = 0;
+  result = result.replace(/【此处插入[^】]+】/g, () => {
+    if (slotIndex >= mediaAssets.bodyImages.length) return "";
+    const slot = mediaAssets.bodyImages[slotIndex];
+    slotIndex++;
+    const previewUrl = getStoredAssetPublicUrl(slot.storageKey);
+    return buildFigure(slot, previewUrl);
+  });
+  // Clean up empty <p> tags left after marker replacement
+  result = result.replace(/<p([^>]*)>\s*<\/p>/g, "");
+
+  return result;
+}
+
+function buildFigure(slot: ArticleMediaAssets["bodyImages"][number], previewUrl: string | null): string {
+  const parts = [
+    `<figure data-codex-media-slot="${slot.id}" data-codex-media-marker="${slot.markerToken}" style="margin:24px 0;">`,
+    previewUrl
+      ? `<img src="${previewUrl}" alt="${escapeHtml(slot.label)}" data-codex-preview-image="true" style="display:block;width:100%;border-radius:18px;border:1px solid rgba(15,23,42,0.08);" />`
+      : `<div data-codex-empty-image="true" style="display:flex;align-items:center;justify-content:center;min-height:180px;border:1px dashed rgba(15,23,42,0.24);border-radius:18px;background:rgba(148,163,184,0.08);color:#475569;font-size:14px;padding:24px;text-align:center;">Please upload image for ${escapeHtml(slot.label)}</div>`,
+    `<figcaption style="margin-top:10px;font-size:12px;color:#64748b;text-align:center;">${escapeHtml(slot.placeholder || "image")}</figcaption>`,
+    "</figure>"
+  ];
+  return parts.join("");
 }
 
 function buildBlockquoteStyle(tokens: TemplateDefinition["tokens"]): string {
@@ -233,7 +254,7 @@ export function injectTemplateTokens(
   const effectiveParagraphMargin = customOptions?.paragraphMargin ?? tokens.paragraphMargin;
 
   let styledHtml = mediaAssets ? replaceBase64ImagesWithPlaceholders(html, mediaAssets) : html;
-  styledHtml = mediaAssets ? injectMediaSlots(styledHtml, mediaAssets) : html;
+  styledHtml = mediaAssets ? injectMediaSlots(styledHtml, mediaAssets) : styledHtml;
 
   styledHtml = addStyleToTag(
     styledHtml,
