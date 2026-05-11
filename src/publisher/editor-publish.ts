@@ -1,8 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import puppeteer from "puppeteer";
 import type { Browser, Page } from "puppeteer";
+
+import { launchBrowser } from "./browser-launcher.js";
 
 import { getAppConfig } from "../config/app-config.js";
 import type { ArticleRecord } from "../shared/types.js";
@@ -675,7 +676,7 @@ export async function publishWechatDraft(input: {
     `${Date.now()}-${sanitizeSegment(input.accountName)}-wechat-save.png`
   );
   const storedCookies = readStoredCookies(input.accountId);
-  const browser = await puppeteer.launch({ headless: true });
+  const browser = await launchBrowser();
   let browserCrashed = false;
 
   try {

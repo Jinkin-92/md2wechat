@@ -9,6 +9,8 @@ export function SettingsPage() {
   const location = useLocation();
   const [apiUrl, setApiUrl] = useState(DEFAULT_SETTINGS.apiUrl);
   const [apiKey, setApiKey] = useState(DEFAULT_SETTINGS.apiKey);
+  const [platformName, setPlatformName] = useState(DEFAULT_SETTINGS.platformName);
+  const [originalChecked, setOriginalChecked] = useState(DEFAULT_SETTINGS.originalChecked);
   const [message, setMessage] = useState("");
   const [isTesting, setIsTesting] = useState(false);
 
@@ -16,10 +18,12 @@ export function SettingsPage() {
     const settings = readAppSettings();
     setApiUrl(settings.apiUrl);
     setApiKey(settings.apiKey);
+    setPlatformName(settings.platformName);
+    setOriginalChecked(settings.originalChecked);
   }, []);
 
   function handleSave() {
-    writeAppSettings({ apiUrl, apiKey });
+    writeAppSettings({ apiUrl, apiKey, platformName, originalChecked });
     setMessage("设置已保存");
     setTimeout(() => setMessage(""), 2500);
   }
@@ -49,7 +53,7 @@ export function SettingsPage() {
           </svg>
           返回工作台
         </button>
-        <h1 className="settings-title">Minimax 设置</h1>
+        <h1 className="settings-title">设置</h1>
       </div>
 
       <div className="settings-body">
@@ -86,6 +90,40 @@ export function SettingsPage() {
               </button>
             </div>
             {message ? <span className="settings-inline-message">{message}</span> : null}
+          </div>
+        </div>
+
+        <div className="settings-card">
+          <div className="settings-card-header">
+            <h2 className="settings-card-title">公众号信息</h2>
+          </div>
+          <div className="settings-card-body">
+            <div className="settings-field">
+              <label className="settings-field-label">公众号名称</label>
+              <input
+                type="text"
+                className="settings-input"
+                placeholder="例如：Jinkin遐想"
+                value={platformName}
+                onChange={(event) => setPlatformName(event.target.value)}
+              />
+            </div>
+            <div className="settings-row">
+              <span className="settings-row-label">原创声明</span>
+              <label className="settings-toggle">
+                <input
+                  type="checkbox"
+                  checked={originalChecked}
+                  onChange={(event) => setOriginalChecked(event.target.checked)}
+                />
+                <span className="settings-toggle-slider" />
+              </label>
+            </div>
+            <div className="settings-save-row settings-save-row-left">
+              <button className="settings-save-btn" onClick={handleSave}>
+                保存设置
+              </button>
+            </div>
           </div>
         </div>
       </div>

@@ -1,8 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import puppeteer from "puppeteer";
 import type { Page } from "puppeteer";
+
+import { launchBrowser } from "./browser-launcher.js";
 
 import { getAppConfig } from "../config/app-config.js";
 import { readStoredCookies, saveCookies } from "../shared/session-cookies.js";
@@ -63,6 +64,25 @@ export function buildDraftEditUrl(currentUrl: string, appmsgId: string): string 
   return reopened.toString();
 }
 
+function buildNewArticleEditUrl(currentUrl: string): string {
+  const current = new URL(currentUrl);
+  const token = current.searchParams.get("token");
+  const lang = current.searchParams.get("lang") ?? "zh_CN";
+
+  if (!token) {
+    throw new Error("Current URL does not contain token.");
+  }
+
+  const url = new URL("https://mp.weixin.qq.com/cgi-bin/appmsg");
+  url.searchParams.set("t", "media/appmsg_edit_v2");
+  url.searchParams.set("action", "edit");
+  url.searchParams.set("isNew", "1");
+  url.searchParams.set("type", "77");
+  url.searchParams.set("token", token);
+  url.searchParams.set("lang", lang);
+  return url.toString();
+}
+
 async function gotoHrefIfPresent(page: Page, selector: string): Promise<void> {
   const currentUrl = page.url();
   const href = await page
@@ -97,6 +117,30 @@ async function findFirstSelector(page: Page, candidates: readonly string[]): Pro
   return null;
 }
 
+async function clickElementByText(page: Page, texts: readonly string[]): Promise<boolean> {
+  const result = await page.evaluate((searchTexts) => {
+    const elements = [...document.querySelectorAll("a, button, div, span")];
+    for (const el of elements) {
+      const text = el.textContent?.trim() ?? "";
+      if (searchTexts.some((t) => text.includes(t))) {
+        const rect = el.getBoundingClientRect();
+        return {
+          x: rect.left + rect.width / 2,
+          y: rect.top + rect.height / 2,
+          found: true as const
+        };
+      }
+    }
+    return { found: false as const };
+  }, texts);
+
+  if (result.found) {
+    await page.mouse.click(result.x, result.y);
+    return true;
+  }
+  return false;
+}
+
 async function clickDraftEntryAndDetectEditor(
   page: Page,
   selector: string,
@@ -123,8 +167,20 @@ async function clickDraftEntryAndDetectEditor(
     }
   }
 
-  const writeNewSelector = await findFirstSelector(page, WECHAT_SELECTORS.writeNewArticleCandidates);
-  if (writeNewSelector) {
+  let writeNewSelector = await findFirstSelector(page, WECHAT_SELECTORS.writeNewArticleCandidates);
+
+  // Fallback: search for common "create new article" text if CSS selectors miss it.
+  if (!writeNewSelector) {
+    const clicked = await clickElementByText(page, ["新的创作", "新建图文", "写新文章", "新建", "创作"]);
+    if (clicked) {
+      await page
+        .waitForNetworkIdle({
+          idleTime: 800,
+          timeout: 10000
+        })
+        .catch(() => undefined);
+    }
+  } else {
     await gotoHrefIfPresent(page, writeNewSelector);
     await page
       .waitForNetworkIdle({
@@ -137,9 +193,16 @@ async function clickDraftEntryAndDetectEditor(
   const matchedTitleSelector = await findFirstSelector(page, WECHAT_SELECTORS.titleInputCandidates);
   const editorUrl = page.url();
   const bodyText = await page.evaluate(() => document.body.innerText ?? "");
+  // A true editor page must either contain appmsg_edit in URL or have a visible title input.
+  // action=list_card is a list page, not an editor.
+  const isEditorUrl = /appmsg_edit/i.test(editorUrl);
+  const isListPage = /action=list_card/i.test(editorUrl);
+  // For SPA like WeChat MP, URL may not change after clicking "new article"; rely on title selector.
+  const urlChanged = editorUrl !== beforeUrl;
   const editorReachable =
-    editorUrl !== beforeUrl &&
-    (/appmsg/i.test(editorUrl) || Boolean(matchedTitleSelector)) &&
+    (urlChanged || Boolean(matchedTitleSelector)) &&
+    !isListPage &&
+    (isEditorUrl || Boolean(matchedTitleSelector)) &&
     !bodyText.includes("请重新登录");
 
   return {
@@ -253,9 +316,7 @@ export async function probeWechatDraftEntry(
   );
   const storedCookies = readStoredCookies(account.id);
 
-  const browser = await puppeteer.launch({
-    headless: true
-  });
+  const browser = await launchBrowser();
 
   let browserCrashed = false;
 
@@ -311,11 +372,20 @@ export async function probeWechatDraftEntry(
       }
     }
 
-    if (!editorReachable) {
-      matchedSelector = await findFirstSelector(page, WECHAT_SELECTORS.createDraftEntryCandidates);
+    // If backend is reachable but we haven't entered the editor yet,
+    // navigate directly to the new-article editor URL using the token from current page.
+    if (!editorReachable && backendReachable) {
+      try {
+        const newArticleUrl = buildNewArticleEditUrl(page.url());
+        await page.goto(newArticleUrl, { waitUntil: "networkidle2", timeout: 30000 });
+        await page.waitForNetworkIdle({ idleTime: 800, timeout: 10000 }).catch(() => undefined);
+        matchedSelector = "direct-nav:new-article";
+      } catch {
+        matchedSelector = null;
+      }
     }
 
-    if (!editorReachable && matchedSelector) {
+    if (!editorReachable && matchedSelector && !matchedSelector.startsWith("direct-nav:")) {
       const editorResult = await clickDraftEntryAndDetectEditor(
         page,
         matchedSelector,
@@ -324,6 +394,21 @@ export async function probeWechatDraftEntry(
       editorReachable = editorResult.editorReachable;
       editorUrl = editorResult.editorUrl;
       matchedTitleSelector = editorResult.matchedTitleSelector;
+    }
+
+    if (!editorReachable && matchedSelector?.startsWith("direct-nav:")) {
+      matchedTitleSelector = await findFirstSelector(page, WECHAT_SELECTORS.titleInputCandidates);
+      const editorUrlAfterNav = page.url();
+      const bodyTextAfterNav = await page.evaluate(() => document.body.innerText ?? "");
+      const isEditorUrl = /appmsg_edit/i.test(editorUrlAfterNav);
+      const isListPage = /action=list_card/i.test(editorUrlAfterNav);
+      editorReachable =
+        !isListPage &&
+        (isEditorUrl || Boolean(matchedTitleSelector)) &&
+        !bodyTextAfterNav.includes("请重新登录");
+      if (editorReachable) {
+        editorUrl = editorUrlAfterNav;
+      }
     }
 
     await page.screenshot({

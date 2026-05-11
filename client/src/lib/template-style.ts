@@ -56,14 +56,6 @@ export const TEMPLATE_CARD_STYLES: Record<string, TemplateCardStyle> = {
     chip: "Local Terminal",
     surface: "#ffffff"
   },
-  "opencode-ai": {
-    bg: "linear-gradient(135deg, #0d1117 0%, #1f2937 100%)",
-    text: "#e6edf3",
-    accent: "#58a6ff",
-    fontFamily: "'Source Han Sans SC', sans-serif",
-    chip: "GitHub Dark",
-    surface: "#25262b"
-  },
   replicate: {
     bg: "linear-gradient(135deg, #ffe0e4 0%, #fff3f4 100%)",
     text: "#57181d",
@@ -72,20 +64,44 @@ export const TEMPLATE_CARD_STYLES: Record<string, TemplateCardStyle> = {
     chip: "Creator Lab",
     surface: "#fff4f6"
   },
-  runwayml: {
-    bg: "linear-gradient(135deg, #161625 0%, #32194a 100%)",
-    text: "#faf5ff",
-    accent: "#a855f7",
-    fontFamily: "'LXGW WenKai', cursive",
-    chip: "Motion Studio",
-    surface: "#14141a"
-  },
   "together-ai": {
     bg: "linear-gradient(135deg, #edf9ff 0%, #ffffff 100%)",
     text: "#16324f",
     accent: "#0ea5e9",
     fontFamily: "'Ma Shan Zheng', cursive",
     chip: "Blueprint",
+    surface: "#ffffff"
+  },
+  spotify: {
+    bg: "linear-gradient(135deg, #121212 0%, #1f1f1f 100%)",
+    text: "#ffffff",
+    accent: "#1ed760",
+    fontFamily: "'Inter', sans-serif",
+    chip: "Music Streaming",
+    surface: "#181818"
+  },
+  ferrari: {
+    bg: "linear-gradient(135deg, #181818 0%, #303030 100%)",
+    text: "#ffffff",
+    accent: "#da291c",
+    fontFamily: "'Inter', sans-serif",
+    chip: "Luxury Automotive",
+    surface: "#181818"
+  },
+  playstation: {
+    bg: "linear-gradient(135deg, #000000 0%, #181818 100%)",
+    text: "#000000",
+    accent: "#0070d1",
+    fontFamily: "'Inter', sans-serif",
+    chip: "Gaming Console",
+    surface: "#ffffff"
+  },
+  nike: {
+    bg: "linear-gradient(135deg, #ffffff 0%, #f5f5f5 100%)",
+    text: "#111111",
+    accent: "#111111",
+    fontFamily: "'Inter', sans-serif",
+    chip: "Athletic Retail",
     surface: "#ffffff"
   }
 };

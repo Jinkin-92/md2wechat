@@ -41,24 +41,34 @@ export const FALLBACK_TEMPLATES: TemplateSummary[] = [
     description: "Run LLMs locally. Terminal-first, monochrome simplicity."
   },
   {
-    id: "opencode-ai",
-    name: "OpenCode AI",
-    description: "AI coding platform. Developer-centric dark theme."
-  },
-  {
     id: "replicate",
     name: "Replicate",
     description: "Run ML models via API. Clean white canvas, code-forward."
   },
   {
-    id: "runwayml",
-    name: "RunwayML",
-    description: "AI video generation. Cinematic dark UI, media-rich layout."
-  },
-  {
     id: "together-ai",
     name: "Together AI",
     description: "Open-source AI infrastructure. Technical, blueprint-style design."
+  },
+  {
+    id: "spotify",
+    name: "Spotify",
+    description: "Music streaming. Vibrant green on dark, bold type, album-art-driven."
+  },
+  {
+    id: "ferrari",
+    name: "Ferrari",
+    description: "Luxury automotive. Chiaroscuro editorial, Ferrari Red accents, cinematic black."
+  },
+  {
+    id: "playstation",
+    name: "PlayStation",
+    description: "Gaming console retail. Three-surface channel layout, cyan hover-scale."
+  },
+  {
+    id: "nike",
+    name: "Nike",
+    description: "Athletic retail. Monochrome UI, massive uppercase type, full-bleed photography."
   }
 ];
 
@@ -205,9 +215,11 @@ export async function renderArticle(
     fontSize?: string;
     lineHeight?: string;
     paragraphIndent?: boolean;
+    paragraphMargin?: string;
     sectionDivider?: string;
     endMarker?: string;
-    textCard?: string;
+    platformName?: string;
+    originalChecked?: boolean;
   }
 ): Promise<ArticleDetail> {
   const response = await fetch(buildApiUrl("/api/articles/render"), {
@@ -380,6 +392,68 @@ export async function refreshPublishAccount(accountId: string): Promise<{
   }
 
   return payload;
+}
+
+export async function startWechatQrLogin(accountId: string): Promise<{
+  sessionId: string;
+  screenshotPath: string;
+  storageKey: string;
+  pageTitle: string;
+  finalUrl: string;
+}> {
+  const response = await fetch(buildApiUrl(`/api/publish/accounts/${accountId}/qr-login/start`), {
+    method: "POST"
+  });
+
+  const payload = await parseJsonResponse<{
+    sessionId: string;
+    screenshotPath: string;
+    storageKey: string;
+    pageTitle: string;
+    finalUrl: string;
+  } | { error: string }>(response);
+  if (!response.ok || "error" in payload) {
+    throw new Error("error" in payload ? payload.error : "启动二维码登录失败。");
+  }
+
+  return payload;
+}
+
+export async function checkWechatQrLogin(accountId: string, sessionId: string): Promise<{
+  sessionId: string;
+  accountId: string;
+  status: "pending" | "authenticated" | "expired";
+  screenshotPath: string;
+  storageKey: string;
+  pageTitle: string;
+  finalUrl: string;
+  sessionFilePath: string | null;
+}> {
+  const response = await fetch(buildApiUrl(`/api/publish/accounts/${accountId}/qr-login/${sessionId}`));
+  const payload = await parseJsonResponse<{
+    sessionId: string;
+    accountId: string;
+    status: "pending" | "authenticated" | "expired";
+    screenshotPath: string;
+    storageKey: string;
+    pageTitle: string;
+    finalUrl: string;
+    sessionFilePath: string | null;
+  } | { error: string }>(response);
+  if (!response.ok || "error" in payload) {
+    throw new Error("error" in payload ? payload.error : "检查登录状态失败。");
+  }
+
+  return payload;
+}
+
+export async function cancelWechatQrLogin(accountId: string, sessionId: string): Promise<void> {
+  const response = await fetch(buildApiUrl(`/api/publish/accounts/${accountId}/qr-login/${sessionId}`), {
+    method: "DELETE"
+  });
+  if (!response.ok) {
+    throw new Error("取消二维码登录失败。");
+  }
 }
 
 export async function testAiConnection(input: {

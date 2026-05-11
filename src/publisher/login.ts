@@ -1,7 +1,8 @@
 import path from "node:path";
 
-import puppeteer from "puppeteer";
 import type { Browser } from "puppeteer";
+
+import { launchBrowser } from "./browser-launcher.js";
 
 import { getAppConfig } from "../config/app-config.js";
 import { readStoredCookies, saveCookies } from "../shared/session-cookies.js";
@@ -35,9 +36,7 @@ export async function ensureWechatLogin(account: PublishAccount): Promise<Publis
   const screenshotDir = ensureScreenshotDir();
 
   const storedCookies = readStoredCookies(account.id);
-  const browser = await puppeteer.launch({
-    headless: true
-  });
+  const browser = await launchBrowser();
 
   let browserCrashed = false;
 

@@ -5,12 +5,14 @@ import { injectTemplateTokens } from "../../renderer/injector.js";
 import { parseMarkdown } from "../../renderer/parser.js";
 import {
   createArticleFromUpload,
+  extractDocxImages,
   getArticleById,
   getArticleBySourceFileName,
   listArticles,
   saveArticleAsset,
   updateArticle
 } from "../../storage/articles.js";
+import mammoth from "mammoth";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -229,29 +231,43 @@ router.post("/:articleId/assets", upload.single("file"), (req, res) => {
   });
 });
 
-router.post("/upload", upload.single("file"), (req, res) => {
+router.post("/upload", upload.single("file"), async (req, res) => {
   const file = req.file;
 
   if (!file) {
     return res.status(400).json({
-      error: "请先选择一个 Markdown 文件。"
+      error: "请先选择一个文件。"
     });
   }
 
-  const supportedExts = [".md", ".txt"];
-  const ext = supportedExts.find((e) =>
-    file.originalname.toLowerCase().endsWith(e)
-  );
-  if (!ext) {
+  const ext = file.originalname.toLowerCase().slice(file.originalname.lastIndexOf("."));
+  const supportedMdExts = [".md", ".txt"];
+  const supportedDocExts = [".doc", ".docx"];
+
+  let markdown: string;
+  let docxImages: Buffer[] = [];
+
+  if (supportedMdExts.includes(ext)) {
+    markdown = file.buffer.toString("utf8");
+  } else if (supportedDocExts.includes(ext)) {
+    const result = await mammoth.convertToHtml({ buffer: file.buffer });
+    markdown = result.value;
+    if (!markdown.trim()) {
+      return res.status(422).json({
+        error: "Word 文档内容为空或无法读取。"
+      });
+    }
+    docxImages = await extractDocxImages(file.buffer);
+  } else {
     return res.status(400).json({
-      error: "当前仅支持上传 .md 或 .txt 文件。"
+      error: "当前仅支持上传 .md、.txt、.doc、.docx 文件。"
     });
   }
 
-  const markdown = file.buffer.toString("utf8");
   const article = createArticleFromUpload({
     sourceFileName: file.originalname,
-    markdown
+    markdown,
+    docxImages
   });
 
   return res.status(201).json(article);
@@ -279,7 +295,8 @@ router.post("/render", async (req, res) => {
   const renderedHtml = injectTemplateTokens(baseHtml, templateId, article.mediaAssets, customOptions, {
     title: article.title,
     author: article.metadata.author,
-    digest: article.metadata.digest
+    digest: article.metadata.digest,
+    originalChecked: article.metadata.originalChecked
   });
   const updatedArticle = updateArticle({
     ...article,

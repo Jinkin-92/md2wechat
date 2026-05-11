@@ -9,6 +9,7 @@ import type {
   ArticleRecord,
   ArticleSummary
 } from "../shared/types.js";
+import JSZip from "jszip";
 
 const ARTICLES_DIR = path.resolve(process.cwd(), "data/articles");
 const UPLOADS_DIR = path.resolve(process.cwd(), "data/uploads");
@@ -93,6 +94,24 @@ function extractImagePlaceholders(rawMarkdown: string): string[] {
   );
 }
 
+export async function extractDocxImages(docxBuffer: Buffer): Promise<Buffer[]> {
+  try {
+    const zip = await JSZip.loadAsync(docxBuffer);
+    const mediaFiles = Object.keys(zip.files).filter((name) => name.startsWith("word/media/"));
+    const buffers: Buffer[] = [];
+    for (const name of mediaFiles) {
+      const file = zip.file(name);
+      if (file) {
+        const data = await file.async("nodebuffer");
+        buffers.push(data);
+      }
+    }
+    return buffers;
+  } catch {
+    return [];
+  }
+}
+
 function createBodyImageAsset(
   articleId: string,
   placeholder: string,
@@ -116,7 +135,8 @@ function createBodyImageAsset(
 function buildDefaultMediaAssets(
   articleId: string,
   markdown: string,
-  persistAssets = false
+  persistAssets = false,
+  docxImages: Buffer[] = []
 ): ArticleMediaAssets {
   const placeholders = extractImagePlaceholders(markdown);
   const bodyImages = placeholders.map((placeholder, index) =>
@@ -125,6 +145,33 @@ function buildDefaultMediaAssets(
   const coverSourcePath = resolveSeedImagePath(String(placeholders.length + 1));
   const storedCover =
     coverSourcePath && persistAssets ? persistSeedAsset(articleId, coverSourcePath) : null;
+
+  if (docxImages.length > 0) {
+    for (let i = 0; i < docxImages.length; i++) {
+      const imgBuffer = docxImages[i];
+      const ext = ".jpeg";
+      const targetName = `${Date.now()}-${i + 1}${ext}`;
+      const absolutePath = path.join(getArticleAssetDir(articleId), targetName);
+      fs.writeFileSync(absolutePath, imgBuffer);
+      const storageKey = path.relative(getAppConfig().dataDir, absolutePath).replace(/\\/g, "/");
+      const matchedSlot = bodyImages.find((slot, idx) => {
+        const slotPlaceholder = slot.placeholder;
+        return slotPlaceholder && idx === i;
+      });
+      if (bodyImages[i]) {
+        bodyImages[i] = { ...bodyImages[i], localPath: absolutePath, storageKey };
+      } else {
+        bodyImages.push({
+          id: `slot_${i + 1}`,
+          placeholder: `【图片 ${i + 1}】`,
+          label: `正文图片 ${i + 1}`,
+          markerToken: `[[MD2WECHAT_IMAGE_SLOT_${i + 1}]]`,
+          localPath: absolutePath,
+          storageKey
+        });
+      }
+    }
+  }
 
   return {
     coverLocalPath: storedCover?.absolutePath ?? coverSourcePath ?? null,
@@ -172,17 +219,14 @@ function normalizeBodyImageAsset(
 }
 
 function normalizeMediaAssets(article: ArticleRecord): ArticleMediaAssets {
-  const defaults = buildDefaultMediaAssets(article.id, article.rawMarkdown);
   const existing = article.mediaAssets;
 
   if (!existing) {
-    return defaults;
+    return buildDefaultMediaAssets(article.id, article.rawMarkdown);
   }
 
-  let coverLocalPath =
-    typeof existing.coverLocalPath === "string" ? existing.coverLocalPath : defaults.coverLocalPath;
-  let coverStorageKey =
-    typeof existing.coverStorageKey === "string" ? existing.coverStorageKey : defaults.coverStorageKey;
+  let coverLocalPath = existing.coverLocalPath ?? null;
+  let coverStorageKey = existing.coverStorageKey ?? null;
 
   if (coverLocalPath && !coverStorageKey && fs.existsSync(coverLocalPath)) {
     if (coverLocalPath.startsWith(getAppConfig().dataDir)) {
@@ -194,16 +238,21 @@ function normalizeMediaAssets(article: ArticleRecord): ArticleMediaAssets {
     }
   }
 
+  const bodyImages = (existing.bodyImages ?? []).map((item, index) =>
+    normalizeBodyImageAsset(article.id, {
+      id: `slot_${index + 1}`,
+      placeholder: item.placeholder ?? `【图片 ${index + 1}】`,
+      label: item.label ?? `正文图片 ${index + 1}`,
+      markerToken: `[[MD2WECHAT_IMAGE_SLOT_${index + 1}]]`,
+      localPath: null,
+      storageKey: null
+    }, item)
+  );
+
   return {
     coverLocalPath,
     coverStorageKey,
-    bodyImages: defaults.bodyImages.map((defaultItem) => {
-      const matched =
-        existing.bodyImages?.find(
-          (item) => item.id === defaultItem.id || item.placeholder === defaultItem.placeholder
-        ) ?? undefined;
-      return normalizeBodyImageAsset(article.id, defaultItem, matched);
-    })
+    bodyImages
   };
 }
 
@@ -258,6 +307,7 @@ export function getStoredAssetPublicUrl(storageKey: string | null): string | nul
 export function createArticleFromUpload(input: {
   sourceFileName: string;
   markdown: string;
+  docxImages?: Buffer[];
 }): ArticleRecord {
   ensureStorageDirs();
 
@@ -283,9 +333,10 @@ export function createArticleFromUpload(input: {
     metadata: {
       author: "",
       digest: "",
-      wordCount: countWords(input.markdown)
+      wordCount: countWords(input.markdown),
+      originalChecked: false
     },
-    mediaAssets: buildDefaultMediaAssets(id, input.markdown, true),
+    mediaAssets: buildDefaultMediaAssets(id, input.markdown, true, input.docxImages ?? []),
     status: "draft",
     createdAt: now,
     updatedAt: now

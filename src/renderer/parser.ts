@@ -5,6 +5,10 @@ import remarkRehype from "remark-rehype";
 import { unified } from "unified";
 
 export async function parseMarkdown(markdown: string): Promise<string> {
+  const trimmed = markdown.trim();
+  if (trimmed.startsWith("<")) {
+    return trimmed;
+  }
   const file = await unified()
     .use(remarkParse)
     .use(remarkGfm)

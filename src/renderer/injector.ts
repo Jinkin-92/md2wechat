@@ -324,7 +324,7 @@ export function injectTemplateTokens(
   styledHtml = addStyleToTag(
     styledHtml,
     "th",
-    `padding:10px 12px;background:${tokens.quoteBackground};border:1px solid ${tokens.borderColor};text-align:left;color:${tokens.headingColor};font-size:14px;`
+    `padding:10px 12px;background:${tokens.quoteBackground};border:1px solid ${tokens.borderColor};text-align:left;color:${tokens.tableHeaderTextColor ?? tokens.headingColor};font-size:14px;`
   );
   styledHtml = addStyleToTag(
     styledHtml,
@@ -335,6 +335,19 @@ export function injectTemplateTokens(
     styledHtml,
     "strong",
     `color:${tokens.headingColor};font-weight:700;`
+  );
+
+  // Fix: blockquote internal elements should use blockquoteTextColor instead of textColor
+  styledHtml = styledHtml.replace(
+    /<blockquote([^>]*)>([\s\S]*?)<\/blockquote>/g,
+    (_match, attrs, content) => {
+      // Replace color in nested elements within blockquote
+      const textColorRe = new RegExp(`color:${tokens.textColor}`, 'g');
+      const blockquoteTextColor = tokens.blockquoteTextColor;
+      const fixedContent = content
+        .replace(textColorRe, `color:${blockquoteTextColor}`);
+      return `<blockquote${attrs}>${fixedContent}</blockquote>`;
+    }
   );
 
   const author = meta?.author?.trim() || "Jinkin";

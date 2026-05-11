@@ -9,9 +9,9 @@ export type AppSettings = {
 };
 
 export const DEFAULT_SETTINGS: AppSettings = {
-  apiUrl: "https://token-plan-cn.xiaomimimo.com/anthropic",
+  apiUrl: "https://api.minimaxi.com/anthropic",
   apiKey: "",
-  model: "mimo-v2.5",
+  model: "MiniMax-M2.7",
   platformName: "",
   originalChecked: false
 };

@@ -15,6 +15,14 @@ npm-debug.log*
 pnpm-lock.yaml
 yarn.lock
 
+data/article-assets/*
+!data/article-assets/.gitkeep
+data/publish/*
+!data/publish/.gitkeep
+.playwright-mcp/
+current-state.png
+.claude/settings.local.json
+
 # Logs
 *.log
 *.out.log
@@ -33,6 +41,25 @@ tsconfig.tsbuildinfo
 
 # Word docs (use git instead)
 *.docx
+
+# Test artifacts / screenshots
+*.png
+*.jpg
+*.jpeg
+*.gif
+!client/public/**
+!client/src/assets/**
+!tests/**
+!e2e/**
+!docs/**
+
+# Misc generated files
+mimo-test*.json
+opencode-ai-*.png
+replicate-*.png
+runwayml-*.png
+typeset*.json
+workbench-*.png
 
 # BMad output (generated)
 _bmad-output/

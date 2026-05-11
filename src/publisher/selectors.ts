@@ -9,18 +9,26 @@ export function validateSelectors(): void {
 export const WECHAT_SELECTORS = {
   bodyImageUploadInput: "#js_editor_insertimage input[type='file']",
   createDraftEntryCandidates: [
-    "a[title='草稿箱']",
-    "a[href*='action=list_card'][href*='type=77']",
+    // Home page "new creation" menu items (e.g. 文章/图文)
+    ".new-creation__menu-item",
+    // Direct editor links
     "a[href*='appmsg_edit_v2'][href*='isNew=1'][href*='type=77']",
+    "a[title*='新建图文']",
+    // Draft list entry (fallback)
+    "a[href*='action=list_card'][href*='type=77']",
+    "a[title='草稿箱']",
     "[data-testid='create-draft']",
     "a[href*='appmsg']",
-    "a[title*='新建图文']",
-    ".weui-desktop-menu a[href*='appmsg']",
-    ".new-creation__menu-item"
+    ".weui-desktop-menu a[href*='appmsg']"
   ],
   writeNewArticleCandidates: [
     "a[href*='appmsg_edit_v2'][href*='isNew=1'][href*='type=77']",
-    "a[title='写新文章']"
+    "a[href*='appmsg_edit']",
+    "a[title*='新建图文']",
+    "a[title='写新文章']",
+    ".new-creation__btn a",
+    "#menuCreate a",
+    ".weui-desktop-menu a[href*='appmsg_edit']"
   ],
   titleInputCandidates: [
     "textarea#title",

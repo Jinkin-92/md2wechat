@@ -2,8 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 
-import puppeteer from "puppeteer";
 import type { Browser, Page } from "puppeteer";
+
+import { launchBrowser } from "./browser-launcher.js";
 
 import { getAppConfig } from "../config/app-config.js";
 import { updatePublishAccount, saveAccountSession } from "../storage/publish.js";
@@ -24,6 +25,7 @@ type QrLoginCheckResult = {
   accountId: string;
   status: "pending" | "authenticated" | "expired";
   screenshotPath: string;
+  storageKey: string;
   pageTitle: string;
   finalUrl: string;
   sessionFilePath: string | null;
@@ -82,6 +84,7 @@ async function cleanupSession(sessionId: string): Promise<void> {
 export async function startWechatQrLogin(account: PublishAccount): Promise<{
   sessionId: string;
   screenshotPath: string;
+  storageKey: string;
   pageTitle: string;
   finalUrl: string;
 }> {
@@ -90,15 +93,15 @@ export async function startWechatQrLogin(account: PublishAccount): Promise<{
     await cleanupSession(previousSessionId);
   }
 
+  const config = getAppConfig();
   const screenshotDir = ensureScreenshotDir();
   const screenshotPath = path.join(
     screenshotDir,
     `${Date.now()}-${sanitizeSegment(account.name)}-wechat-qr.png`
   );
+  const storageKey = path.relative(config.dataDir, screenshotPath).replace(/\\/g, "/");
 
-  const browser = await puppeteer.launch({
-    headless: true
-  });
+  const browser = await launchBrowser();
 
   const page = await browser.newPage();
   await page.setViewport({
@@ -111,10 +114,33 @@ export async function startWechatQrLogin(account: PublishAccount): Promise<{
     timeout: 30000
   });
 
-  await page.screenshot({
-    path: screenshotPath,
-    fullPage: true
-  });
+  // Wait for the QR code image to be rendered before taking screenshot
+  const qrElement = await page
+    .waitForSelector(".login__type__container__scan__qrcode", {
+      visible: true,
+      timeout: 15000
+    })
+    .catch(() => null);
+
+  if (qrElement) {
+    const box = await qrElement.boundingBox();
+    if (box) {
+      // Capture the QR code with some padding to include surrounding hint text
+      await page.screenshot({
+        path: screenshotPath,
+        clip: {
+          x: Math.max(0, Math.round(box.x - 40)),
+          y: Math.max(0, Math.round(box.y - 80)),
+          width: Math.round(box.width + 80),
+          height: Math.round(box.height + 160)
+        }
+      });
+    } else {
+      await page.screenshot({ path: screenshotPath, fullPage: true });
+    }
+  } else {
+    await page.screenshot({ path: screenshotPath, fullPage: true });
+  }
 
   const sessionId = `qr_${randomUUID()}`;
   const record: QrLoginSessionRecord = {
@@ -133,6 +159,7 @@ export async function startWechatQrLogin(account: PublishAccount): Promise<{
   return {
     sessionId,
     screenshotPath,
+    storageKey,
     pageTitle: await page.title(),
     finalUrl: page.url()
   };
@@ -146,6 +173,7 @@ export async function checkWechatQrLogin(account: PublishAccount, sessionId: str
       accountId: account.id,
       status: "expired",
       screenshotPath: "",
+      storageKey: "",
       pageTitle: "",
       finalUrl: "",
       sessionFilePath: null
@@ -159,16 +187,36 @@ export async function checkWechatQrLogin(account: PublishAccount, sessionId: str
       accountId: account.id,
       status: "expired",
       screenshotPath: record.screenshotPath,
+      storageKey: path.relative(getAppConfig().dataDir, record.screenshotPath).replace(/\\/g, "/"),
       pageTitle: "",
       finalUrl: "",
       sessionFilePath: null
     };
   }
 
-  await record.page.screenshot({
-    path: record.screenshotPath,
-    fullPage: true
-  });
+  // Refresh the screenshot; prefer precise QR element capture if available
+  const qrElement = await record.page
+    .$(".login__type__container__scan__qrcode")
+    .catch(() => null);
+
+  if (qrElement) {
+    const box = await qrElement.boundingBox();
+    if (box) {
+      await record.page.screenshot({
+        path: record.screenshotPath,
+        clip: {
+          x: Math.max(0, Math.round(box.x - 40)),
+          y: Math.max(0, Math.round(box.y - 80)),
+          width: Math.round(box.width + 80),
+          height: Math.round(box.height + 160)
+        }
+      });
+    } else {
+      await record.page.screenshot({ path: record.screenshotPath, fullPage: true });
+    }
+  } else {
+    await record.page.screenshot({ path: record.screenshotPath, fullPage: true });
+  }
   record.updatedAt = new Date().toISOString();
 
   const pageTitle = await record.page.title();
@@ -189,6 +237,7 @@ export async function checkWechatQrLogin(account: PublishAccount, sessionId: str
       accountId: account.id,
       status: "pending",
       screenshotPath: record.screenshotPath,
+      storageKey: path.relative(getAppConfig().dataDir, record.screenshotPath).replace(/\\/g, "/"),
       pageTitle,
       finalUrl,
       sessionFilePath: null
@@ -211,6 +260,7 @@ export async function checkWechatQrLogin(account: PublishAccount, sessionId: str
     accountId: account.id,
     status: "authenticated",
     screenshotPath: record.screenshotPath,
+    storageKey: path.relative(getAppConfig().dataDir, record.screenshotPath).replace(/\\/g, "/"),
     pageTitle,
     finalUrl,
     sessionFilePath

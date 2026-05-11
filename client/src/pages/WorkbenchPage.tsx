@@ -4,10 +4,17 @@ import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import {
   applySmartTypesetting,
   buildArticleAssetUrl,
+  cancelWechatQrLogin,
+  checkWechatQrLogin,
+  createPublishTask,
   getArticle,
   getArticles,
+  getPublishAccounts,
   getTemplates,
+  refreshPublishAccount,
   renderArticle,
+  runPublishTask,
+  startWechatQrLogin,
   updateArticleContent,
   updateArticleMetadata
 } from "../lib/api";
@@ -15,7 +22,7 @@ import { extractEditableHtml, serializeEditableHtmlToMarkdown } from "../lib/ric
 import { readAppSettings } from "../lib/settings";
 import { getTemplateCardStyle } from "../lib/template-style";
 import { readWorkbenchState, writeWorkbenchState } from "../lib/workbench";
-import type { ArticleDetail, ArticleSummary, TemplateSummary } from "../types";
+import type { ArticleDetail, ArticleSummary, PublishAccount, PublishTask, TemplateSummary } from "../types";
 
 function renderTemplateCard(
   template: TemplateSummary,
@@ -69,12 +76,22 @@ export function WorkbenchPage() {
   const [spacing, setSpacing] = useState<"compact" | "normal" | "relaxed">("normal");
   const [sectionDivider, setSectionDivider] = useState("line");
   const [endMarker, setEndMarker] = useState("none");
-  const [textCard, setTextCard] = useState("none");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [isRendering, setIsRendering] = useState(false);
   const [isTypesetting, setIsTypesetting] = useState(false);
+
+  // Publish states
+  const [publishModalVisible, setPublishModalVisible] = useState(false);
+  const [publishAccounts, setPublishAccounts] = useState<PublishAccount[]>([]);
+  const [selectedAccount, setSelectedAccount] = useState<PublishAccount | null>(null);
+  const [qrLoginSession, setQrLoginSession] = useState<{ sessionId: string; storageKey: string } | null>(null);
+  const [qrLoginStatus, setQrLoginStatus] = useState<"idle" | "loading" | "pending" | "authenticated" | "expired">("idle");
+  const [qrCheckError, setQrCheckError] = useState("");
+  const [isPublishing, setIsPublishing] = useState(false);
+  const [publishTask, setPublishTask] = useState<PublishTask | null>(null);
+  const [publishError, setPublishError] = useState("");
 
   const editorRef = useRef<HTMLDivElement | null>(null);
   const contentTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -110,9 +127,9 @@ export function WorkbenchPage() {
         fontSize: string;
         spacing: "compact" | "normal" | "relaxed";
         paragraphIndent: boolean;
+        paragraphMargin: string;
         sectionDivider: string;
         endMarker: string;
-        textCard: string;
         templateId: string;
       }>
     ) => {
@@ -122,14 +139,18 @@ export function WorkbenchPage() {
       setMessage("");
       try {
         const lineHeightMap = { compact: "1.5", normal: "1.8", relaxed: "2.0" };
+        const paragraphMarginMap = { compact: "0 0 10px", normal: "0 0 16px", relaxed: "0 0 24px" };
         const nextSpacing = optionOverrides?.spacing ?? spacing;
+        const settings = readAppSettings();
         const payload = await renderArticle(selectedArticleId, optionOverrides?.templateId ?? selectedTemplateId, {
           fontSize: optionOverrides?.fontSize ?? fontSize,
           lineHeight: lineHeightMap[nextSpacing],
           paragraphIndent: optionOverrides?.paragraphIndent ?? paragraphIndent,
+          paragraphMargin: optionOverrides?.paragraphMargin ?? paragraphMarginMap[nextSpacing],
           sectionDivider: optionOverrides?.sectionDivider ?? sectionDivider,
           endMarker: optionOverrides?.endMarker ?? endMarker,
-          textCard: optionOverrides?.textCard ?? textCard
+          platformName: settings.platformName,
+          originalChecked: settings.originalChecked
         });
 
         const mergedPayload = {
@@ -148,7 +169,7 @@ export function WorkbenchPage() {
         setIsRendering(false);
       }
     },
-    [selectedArticleId, selectedTemplateId, fontSize, spacing, paragraphIndent, sectionDivider, endMarker, textCard]
+    [selectedArticleId, selectedTemplateId, fontSize, spacing, paragraphIndent, sectionDivider, endMarker]
   );
 
   useEffect(() => {
@@ -170,9 +191,11 @@ export function WorkbenchPage() {
                 fontSize: "16px",
                 lineHeight: "1.8",
                 paragraphIndent: false,
+                paragraphMargin: "0 0 16px",
                 sectionDivider: "line",
                 endMarker: "none",
-                textCard: "none"
+                platformName: readAppSettings().platformName,
+                originalChecked: readAppSettings().originalChecked
               });
         setArticle(hydratedPayload);
         setSelectedTemplateId(nextTemplateId);
@@ -259,13 +282,15 @@ export function WorkbenchPage() {
     if (!selectedArticleId) return;
     setIsRendering(true);
     try {
+      const settings = readAppSettings();
       const payload = await renderArticle(selectedArticleId, templateId, {
         fontSize,
         lineHeight: { compact: "1.5", normal: "1.8", relaxed: "2.0" }[spacing],
         paragraphIndent,
         sectionDivider,
         endMarker,
-        textCard
+        platformName: settings.platformName,
+        originalChecked: settings.originalChecked
       });
       setArticle(payload);
       setMessage("模板已切换");
@@ -314,6 +339,123 @@ export function WorkbenchPage() {
     });
   }
 
+  async function handleOpenPublishModal() {
+    setPublishModalVisible(true);
+    setQrLoginStatus("idle");
+    setQrLoginSession(null);
+    setQrCheckError("");
+    setPublishError("");
+    setPublishTask(null);
+    try {
+      const accounts = await getPublishAccounts();
+      setPublishAccounts(accounts);
+      if (accounts.length > 0) {
+        const readyAccount = accounts.find((a) => a.status === "ready") ?? accounts[0];
+        setSelectedAccount(readyAccount);
+        if (readyAccount.status === "ready" && readyAccount.hasStoredSession) {
+          // 验证存储的会话是否仍然有效
+          setQrLoginStatus("loading");
+          try {
+            const { probe } = await refreshPublishAccount(readyAccount.id);
+            if (probe.loginState === "authenticated") {
+              setQrLoginStatus("authenticated");
+            } else {
+              // 会话已失效，引导重新扫码
+              setQrLoginStatus("idle");
+              setQrCheckError("登录已过期，请重新扫码登录");
+            }
+          } catch {
+            setQrLoginStatus("idle");
+            setQrCheckError("登录状态验证失败，请重新扫码");
+          }
+        } else {
+          setQrLoginStatus("idle");
+        }
+      } else {
+        setSelectedAccount(null);
+      }
+    } catch {
+      setQrCheckError("加载发布账号失败");
+    }
+  }
+
+  function handleClosePublishModal() {
+    setPublishModalVisible(false);
+    if (qrLoginSession && selectedAccount) {
+      void cancelWechatQrLogin(selectedAccount.id, qrLoginSession.sessionId).catch(() => {});
+    }
+    setQrLoginSession(null);
+    setQrLoginStatus("idle");
+  }
+
+  async function handleStartQrLogin() {
+    if (!selectedAccount) return;
+    setQrLoginStatus("loading");
+    setQrCheckError("");
+    try {
+      const result = await startWechatQrLogin(selectedAccount.id);
+      setQrLoginSession({ sessionId: result.sessionId, storageKey: result.storageKey });
+      setQrLoginStatus("pending");
+      void checkQrLoginLoop(result.sessionId, selectedAccount.id);
+    } catch (err) {
+      setQrLoginStatus("idle");
+      setQrCheckError(err instanceof Error ? err.message : "启动二维码登录失败");
+    }
+  }
+
+  async function checkQrLoginLoop(sessionId: string, accountId: string) {
+    try {
+      const result = await checkWechatQrLogin(accountId, sessionId);
+      if (result.status === "authenticated") {
+        setQrLoginStatus("authenticated");
+        const accounts = await getPublishAccounts();
+        setPublishAccounts(accounts);
+        const updated = accounts.find((a) => a.id === accountId);
+        if (updated) setSelectedAccount(updated);
+        return;
+      } else if (result.status === "expired") {
+        setQrLoginStatus("expired");
+        setQrCheckError("二维码已过期，请重新获取");
+        return;
+      }
+      setQrLoginStatus("pending");
+      setTimeout(() => void checkQrLoginLoop(sessionId, accountId), 2000);
+    } catch (err) {
+      setQrCheckError(err instanceof Error ? err.message : "检查登录状态失败");
+    }
+  }
+
+  async function handlePublish() {
+    if (!selectedAccount || !selectedArticleId) return;
+    setIsPublishing(true);
+    setPublishError("");
+    try {
+      const task = await createPublishTask({ articleId: selectedArticleId, accountId: selectedAccount.id });
+      setPublishTask(task);
+      const result = await runPublishTask(task.id);
+      setPublishTask(result);
+      if (result.status === "success") {
+        setMessage("发布成功！文章已保存到草稿箱");
+        setPublishModalVisible(false);
+      } else if (result.status === "failed") {
+        const failedStep = result.steps.find((s) => s.status === "failed");
+        setPublishError(failedStep?.detail ?? "发布失败");
+      }
+    } catch (err) {
+      setPublishError(err instanceof Error ? err.message : "发布失败");
+    } finally {
+      setIsPublishing(false);
+    }
+  }
+
+  function buildScreenshotUrl(filePath: string): string {
+    const normalizedPath = filePath.replace(/\\/g, "/");
+    const dataMarkerIndex = normalizedPath.toLowerCase().indexOf("/data/");
+    if (dataMarkerIndex === -1) return filePath;
+    const relativePath = normalizedPath.slice(dataMarkerIndex + "/data/".length);
+    return `/data/${relativePath.split("/").map((s) => encodeURIComponent(s)).join("/")}`;
+  }
+
   const wordCount = contentInput.replace(/\s/g, "").length;
   const readTime = Math.max(1, Math.ceil(wordCount / 320));
   const coverPreviewUrl = buildArticleAssetUrl({
@@ -360,6 +502,12 @@ export function WorkbenchPage() {
             {isTypesetting ? "智能排版中..." : "智能排版"}
           </button>
           <button className="workbench-topbar-btn" onClick={handleCopyHtml}>复制 HTML</button>
+          <button className="workbench-topbar-btn-primary" onClick={() => void handleOpenPublishModal()}>
+            <svg viewBox="0 0 24 24" width="15" height="15">
+              <path d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+            </svg>
+            发布
+          </button>
         </div>
 
         <div className="workbench-topbar-right">
@@ -485,24 +633,6 @@ export function WorkbenchPage() {
                       }}
                     >
                       {value === "none" ? "无" : value === "end" ? "End" : value === "dot" ? "●" : value === "diamond" ? "◆" : "—"}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="workbench-custom-section">
-                <div className="workbench-custom-label">文字卡片</div>
-                <div className="workbench-chip-row">
-                  {["none", "flat", "elevated", "glass"].map((value) => (
-                    <button
-                      key={value}
-                      className={`workbench-chip ${textCard === value ? "active" : ""}`}
-                      onClick={() => {
-                        setTextCard(value);
-                        void triggerRender(contentInput, titleInput, authorInput, { textCard: value });
-                      }}
-                    >
-                      {value === "none" ? "无" : value === "flat" ? "扁平" : value === "elevated" ? "悬浮" : "玻璃"}
                     </button>
                   ))}
                 </div>
@@ -670,6 +800,135 @@ export function WorkbenchPage() {
           )}
         </aside>
       </div>
+
+      {publishModalVisible && (
+        <div className="publish-modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) handleClosePublishModal(); }}>
+          <div className="publish-modal">
+            <div className="publish-modal-header">
+              <h2>发布到公众号</h2>
+              <button className="publish-modal-close" onClick={handleClosePublishModal}>
+                <svg viewBox="0 0 24 24" width="18" height="18">
+                  <path d="M18 6L6 18M6 6l12 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="publish-modal-body">
+              {publishAccounts.length === 0 ? (
+                <div className="publish-no-account">
+                  <p>暂无可用的发布账号</p>
+                  <span>请在设置页面添加公众号发布账号</span>
+                </div>
+              ) : (
+                <>
+                  <div className="publish-account-select">
+                    <label>选择账号</label>
+                    <select
+                      value={selectedAccount?.id ?? ""}
+                      onChange={async (e) => {
+                        const acc = publishAccounts.find((a) => a.id === e.target.value);
+                        setSelectedAccount(acc ?? null);
+                        setQrCheckError("");
+                        if (acc?.status === "ready" && acc.hasStoredSession) {
+                          setQrLoginStatus("loading");
+                          try {
+                            const { probe } = await refreshPublishAccount(acc.id);
+                            if (probe.loginState === "authenticated") {
+                              setQrLoginStatus("authenticated");
+                            } else {
+                              setQrLoginStatus("idle");
+                              setQrCheckError("登录已过期，请重新扫码登录");
+                            }
+                          } catch {
+                            setQrLoginStatus("idle");
+                            setQrCheckError("登录状态验证失败，请重新扫码");
+                          }
+                        } else {
+                          setQrLoginStatus("idle");
+                        }
+                      }}
+                    >
+                      {publishAccounts.map((acc) => (
+                        <option key={acc.id} value={acc.id}>
+                          {acc.name} ({acc.status === "ready" ? "已登录" : acc.status === "expired" ? "已过期" : "未登录"})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {selectedAccount && qrLoginStatus !== "authenticated" && (
+                    <div className="publish-qr-section">
+                      {qrLoginStatus === "idle" && (
+                        <button className="publish-action-btn" onClick={() => void handleStartQrLogin()}>
+                          获取登录二维码
+                        </button>
+                      )}
+                      {qrLoginStatus === "loading" && (
+                        <div className="publish-qr-loading">正在获取二维码...</div>
+                      )}
+                      {qrLoginStatus === "pending" && qrLoginSession && (
+                        <div className="publish-qr-display">
+                          <img
+                            src={`/data/${qrLoginSession.storageKey.split("/").map((s) => encodeURIComponent(s)).join("/")}`}
+                            alt="登录二维码"
+                            className="publish-qr-image"
+                          />
+                          <p className="publish-qr-hint">请使用微信扫码登录</p>
+                          <button
+                            className="publish-action-btn-secondary"
+                            onClick={() => void handleStartQrLogin()}
+                          >
+                            刷新二维码
+                          </button>
+                        </div>
+                      )}
+                      {qrLoginStatus === "expired" && (
+                        <div className="publish-qr-expired">
+                          <p>二维码已过期</p>
+                          <button className="publish-action-btn" onClick={() => void handleStartQrLogin()}>
+                            重新获取二维码
+                          </button>
+                        </div>
+                      )}
+                      {qrCheckError && <div className="publish-error">{qrCheckError}</div>}
+                    </div>
+                  )}
+
+                  {selectedAccount && qrLoginStatus === "authenticated" && (
+                    <div className="publish-ready">
+                      <div className="publish-ready-status">
+                        <svg viewBox="0 0 24 24" width="20" height="20">
+                          <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" stroke="var(--green)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                        </svg>
+                        <span>账号已登录，可以发布文章</span>
+                      </div>
+                      {publishTask && (
+                        <div className="publish-task-status">
+                          <p>发布状态：{publishTask.status === "running" ? "发布中..." : publishTask.status}</p>
+                          {publishTask.steps.map((step) => (
+                            <div key={step.key} className={`publish-step ${step.status}`}>
+                              <span>{step.label}</span>
+                              <span>{step.detail}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {publishError && <div className="publish-error">{publishError}</div>}
+                      <button
+                        className="publish-action-btn-primary"
+                        onClick={() => void handlePublish()}
+                        disabled={isPublishing}
+                      >
+                        {isPublishing ? "发布中..." : "发布到草稿箱"}
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

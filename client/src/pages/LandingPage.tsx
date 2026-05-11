@@ -201,7 +201,7 @@ export function LandingPage() {
                     <input
                       id="landing-file-input"
                       type="file"
-                      accept=".md,.txt"
+                      accept=".md,.txt,.doc,.docx"
                       style={{ display: "none" }}
                       onChange={(event) => {
                         setSelectedFile(event.target.files?.[0] ?? null);
