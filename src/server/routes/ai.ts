@@ -1,5 +1,8 @@
 import { Router } from "express";
+import fs from "node:fs";
+import path from "node:path";
 
+import { getAppConfig } from "../../config/app-config.js";
 import { injectTemplateTokens } from "../../renderer/injector.js";
 import { parseMarkdown } from "../../renderer/parser.js";
 import { getArticleById, updateArticle } from "../../storage/articles.js";
@@ -216,6 +219,116 @@ router.post("/typeset", async (req, res) => {
   } catch (error) {
     return res.status(502).json({
       error: error instanceof Error ? error.message : "智能排版失败。"
+    });
+  }
+});
+
+async function callMinimaxImageGeneration(input: {
+  apiUrl: string;
+  apiKey: string;
+  prompt: string;
+}): Promise<string | null> {
+  const url = input.apiUrl.replace(/\/$/, "").replace(/\/v1\/messages$/, "") + "/v1/image_generation";
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${input.apiKey}`
+    },
+    body: JSON.stringify({
+      model: "image-01",
+      prompt: input.prompt,
+      aspect_ratio: "16:9"
+    })
+  });
+
+  if (!response.ok) {
+    return null;
+  }
+
+  const payload = (await response.json().catch(() => null)) as
+    | { data?: { image?: string; image_url?: string } }
+    | null;
+
+  return payload?.data?.image ?? payload?.data?.image_url ?? null;
+}
+
+router.post("/generate-cover", async (req, res) => {
+  const articleId = typeof req.body.articleId === "string" ? req.body.articleId.trim() : "";
+  const apiUrl = typeof req.body.apiUrl === "string" ? req.body.apiUrl.trim() : "";
+  const apiKey = typeof req.body.apiKey === "string" ? req.body.apiKey.trim() : "";
+  const model = typeof req.body.model === "string" ? req.body.model.trim() : "MiniMax-M2.7";
+
+  if (!articleId || !apiUrl || !apiKey) {
+    return res.status(400).json({ error: "缺少 articleId、API URL 或 API Key。" });
+  }
+
+  const article = getArticleById(articleId);
+  if (!article) {
+    return res.status(404).json({ error: "未找到对应的文章。" });
+  }
+
+  try {
+    const promptText = await callAnthropicCompatible({
+      apiUrl,
+      apiKey,
+      model,
+      system:
+        "You are a prompt engineer for image generation. Given a Chinese article title and content, generate a concise English image generation prompt (max 200 words) suitable for creating a WeChat article cover image. The prompt should be vivid, visually descriptive, and suitable for a flat illustration or high-quality photo style.",
+      prompt: [
+        "Generate an English image generation prompt for a WeChat article cover based on the following content.",
+        "",
+        `Title: ${article.title}`,
+        `Content excerpt: ${article.rawMarkdown.slice(0, 800)}`,
+        "",
+        "Requirements:",
+        "1. The prompt must be in English.",
+        "2. Max 200 words.",
+        "3. Describe a visually striking scene that captures the essence of the article.",
+        "4. Include style keywords like 'flat illustration', 'minimalist', 'high quality', 'clean background'.",
+        "5. Return ONLY the prompt text, no markdown, no quotes."
+      ].join("\n"),
+      maxTokens: 600
+    });
+
+    const imageBase64 = await callMinimaxImageGeneration({
+      apiUrl,
+      apiKey,
+      prompt: promptText
+    });
+
+    if (!imageBase64) {
+      return res.status(502).json({
+        error: "图像生成失败，AI 提示词已生成但未能获取图片。"
+      });
+    }
+
+    const imageBuffer = Buffer.from(imageBase64, "base64");
+    const assetDir = path.resolve(getAppConfig().dataDir, "article-assets", articleId);
+    fs.mkdirSync(assetDir, { recursive: true });
+    const fileName = `${Date.now()}-ai-cover.jpg`;
+    const absolutePath = path.join(assetDir, fileName);
+    fs.writeFileSync(absolutePath, imageBuffer);
+
+    const storageKey = path.relative(getAppConfig().dataDir, absolutePath).replace(/\\/g, "/");
+
+    const updatedArticle = updateArticle({
+      ...article,
+      coverImage: {
+        ...article.coverImage,
+        localPath: absolutePath
+      },
+      mediaAssets: {
+        ...article.mediaAssets,
+        coverLocalPath: absolutePath,
+        coverStorageKey: storageKey
+      }
+    });
+
+    return res.json(updatedArticle);
+  } catch (error) {
+    return res.status(502).json({
+      error: error instanceof Error ? error.message : "封面生成失败。"
     });
   }
 });

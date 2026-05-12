@@ -53,16 +53,16 @@ describe("Templates API", () => {
       }
     });
 
-    it("should include default-light template", async () => {
+    it("should include claude template", async () => {
       const res = await request(app).get("/api/templates");
       const ids = res.body.items.map((t: { id: string }) => t.id);
-      expect(ids).toContain("default-light");
+      expect(ids).toContain("claude");
     });
 
-    it("should include sunset template", async () => {
+    it("should include cohere template", async () => {
       const res = await request(app).get("/api/templates");
       const ids = res.body.items.map((t: { id: string }) => t.id);
-      expect(ids).toContain("sunset");
+      expect(ids).toContain("cohere");
     });
   });
 });

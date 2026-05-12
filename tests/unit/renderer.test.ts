@@ -3,9 +3,9 @@ import { listTemplates, getTemplateById } from "../../src/renderer/templates.js"
 
 describe("Templates Renderer", () => {
   describe("listTemplates", () => {
-    it("should return 6 templates", () => {
+    it("should return 12 templates", () => {
       const templates = listTemplates();
-      expect(templates).toHaveLength(6);
+      expect(templates).toHaveLength(12);
     });
 
     it("should have unique IDs for all templates", () => {
@@ -31,10 +31,10 @@ describe("Templates Renderer", () => {
   });
 
   describe("getTemplateById", () => {
-    it("should return template for valid id", () => {
-      const tpl = getTemplateById("default-light");
-      expect(tpl.id).toBe("default-light");
-      expect(tpl.name).toBe("雾蓝简报");
+    it("should return claude template for valid id", () => {
+      const tpl = getTemplateById("claude");
+      expect(tpl.id).toBe("claude");
+      expect(tpl.name).toBe("Claude");
     });
 
     it("should return first template for unknown id (fallback)", () => {
@@ -43,15 +43,15 @@ describe("Templates Renderer", () => {
       expect(tpl.id).toBe(first.id);
     });
 
-    it("should return sunset template by id", () => {
-      const tpl = getTemplateById("sunset");
-      expect(tpl.name).toBe("落日暖调");
-      expect(tpl.tokens.pageBackground).toBe("#fff5f5");
+    it("should return cohere template by id", () => {
+      const tpl = getTemplateById("cohere");
+      expect(tpl.name).toBe("Cohere");
+      expect(tpl.tokens.pageBackground).toBe("#ffffff");
     });
 
-    it("should return fresh-green template by id", () => {
-      const tpl = getTemplateById("fresh-green");
-      expect(tpl.name).toBe("清新文摘");
+    it("should return mistral-ai template by id", () => {
+      const tpl = getTemplateById("mistral-ai");
+      expect(tpl.name).toBe("Mistral AI");
     });
   });
 });

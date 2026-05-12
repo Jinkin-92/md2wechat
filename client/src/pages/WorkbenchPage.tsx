@@ -7,6 +7,7 @@ import {
   cancelWechatQrLogin,
   checkWechatQrLogin,
   createPublishTask,
+  generateCoverImage,
   getArticle,
   getArticles,
   getPublishAccounts,
@@ -16,8 +17,10 @@ import {
   runPublishTask,
   startWechatQrLogin,
   updateArticleContent,
-  updateArticleMetadata
+  updateArticleMetadata,
+  uploadArticleAsset
 } from "../lib/api";
+import { CoverCropper } from "../components/CoverCropper";
 import { extractEditableHtml, serializeEditableHtmlToMarkdown } from "../lib/rich-editor";
 import { readAppSettings } from "../lib/settings";
 import { getTemplateCardStyle } from "../lib/template-style";
@@ -68,6 +71,7 @@ export function WorkbenchPage() {
   const [selectedTemplateId, setSelectedTemplateId] = useState(workbenchState.selectedTemplateId || "claude");
   const [titleInput, setTitleInput] = useState("");
   const [authorInput, setAuthorInput] = useState("");
+  const [digestInput, setDigestInput] = useState("");
   const [contentInput, setContentInput] = useState("");
   const [previewMode, setPreviewMode] = useState<"article" | "feed" | "html">("article");
   const [leftPanel, setLeftPanel] = useState<"templates" | "custom">("templates");
@@ -81,6 +85,9 @@ export function WorkbenchPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [isRendering, setIsRendering] = useState(false);
   const [isTypesetting, setIsTypesetting] = useState(false);
+  const [coverCropperVisible, setCoverCropperVisible] = useState(false);
+  const [coverCropperSrc, setCoverCropperSrc] = useState<string | null>(null);
+  const [isUploadingCover, setIsUploadingCover] = useState(false);
 
   // Publish states
   const [publishModalVisible, setPublishModalVisible] = useState(false);
@@ -92,6 +99,12 @@ export function WorkbenchPage() {
   const [isPublishing, setIsPublishing] = useState(false);
   const [publishTask, setPublishTask] = useState<PublishTask | null>(null);
   const [publishError, setPublishError] = useState("");
+  const [publishSuccessInfo, setPublishSuccessInfo] = useState<{
+    visible: boolean;
+    articleTitle: string;
+    accountName: string;
+    draftUrl: string | null;
+  }>({ visible: false, articleTitle: "", accountName: "", draftUrl: null });
 
   const editorRef = useRef<HTMLDivElement | null>(null);
   const contentTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -159,7 +172,8 @@ export function WorkbenchPage() {
           title: nextTitle ?? payload.title,
           metadata: {
             ...payload.metadata,
-            author: nextAuthor ?? payload.metadata.author
+            author: nextAuthor ?? payload.metadata.author,
+            digest: article?.metadata.digest ?? payload.metadata.digest ?? ""
           }
         };
         setArticle(mergedPayload);
@@ -201,6 +215,7 @@ export function WorkbenchPage() {
         setSelectedTemplateId(nextTemplateId);
         setTitleInput(hydratedPayload.title);
         setAuthorInput(hydratedPayload.metadata.author);
+        setDigestInput(hydratedPayload.metadata.digest);
         setContentInput(hydratedPayload.rawMarkdown);
       } catch {
         setError("加载文章失败");
@@ -237,7 +252,7 @@ export function WorkbenchPage() {
   );
 
   const syncMetadata = useCallback(
-    (nextTitle: string, nextAuthor: string) => {
+    (nextTitle: string, nextAuthor: string, nextDigest: string) => {
       if (metaTimeoutRef.current) clearTimeout(metaTimeoutRef.current);
       metaTimeoutRef.current = setTimeout(async () => {
         if (!selectedArticleId) return;
@@ -245,7 +260,7 @@ export function WorkbenchPage() {
           const payload = await updateArticleMetadata(selectedArticleId, {
             title: nextTitle,
             author: nextAuthor,
-            digest: article?.metadata.digest ?? ""
+            digest: nextDigest
           });
           setArticle(payload);
           await triggerRender(contentInput, nextTitle, nextAuthor);
@@ -254,7 +269,7 @@ export function WorkbenchPage() {
         }
       }, 400);
     },
-    [article?.metadata.digest, contentInput, selectedArticleId, triggerRender]
+    [contentInput, selectedArticleId, triggerRender]
   );
 
   async function handleSave() {
@@ -265,7 +280,7 @@ export function WorkbenchPage() {
       const payload = await updateArticleMetadata(selectedArticleId, {
         title: titleInput,
         author: authorInput,
-        digest: article?.metadata.digest ?? ""
+        digest: digestInput
       });
       setArticle(payload);
       await triggerRender(contentInput, titleInput, authorInput);
@@ -323,12 +338,68 @@ export function WorkbenchPage() {
       setArticle(payload);
       setTitleInput(payload.title);
       setAuthorInput(payload.metadata.author);
+      setDigestInput(payload.metadata.digest);
       setContentInput(payload.rawMarkdown);
       setMessage("智能排版已完成");
     } catch (err) {
       setError(err instanceof Error ? err.message : "智能排版失败");
     } finally {
       setIsTypesetting(false);
+    }
+  }
+
+  function handleCoverFileSelect(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      setCoverCropperSrc(reader.result as string);
+      setCoverCropperVisible(true);
+    };
+    reader.readAsDataURL(file);
+    event.target.value = "";
+  }
+
+  async function handleCoverCropped(blob: Blob) {
+    if (!selectedArticleId) return;
+    setCoverCropperVisible(false);
+    setCoverCropperSrc(null);
+    setIsUploadingCover(true);
+    try {
+      const file = new File([blob], "cover.jpg", { type: "image/jpeg" });
+      const payload = await uploadArticleAsset({ articleId: selectedArticleId, kind: "cover", file });
+      setArticle(payload);
+      setMessage("封面上传成功");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "封面上传失败");
+    } finally {
+      setIsUploadingCover(false);
+    }
+  }
+
+  async function handleAiGenerateCover() {
+    if (!selectedArticleId) return;
+    const settings = readAppSettings();
+    if (!settings.apiKey.trim()) {
+      setError("请先在设置页填写 Minimax API Key");
+      return;
+    }
+    setIsUploadingCover(true);
+    setMessage("");
+    setError("");
+    try {
+      const payload = await generateCoverImage({
+        articleId: selectedArticleId,
+        apiUrl: settings.apiUrl,
+        apiKey: settings.apiKey,
+        model: settings.model
+      });
+      setArticle(payload);
+      setMessage("AI 封面生成成功");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "AI 封面生成失败");
+    } finally {
+      setIsUploadingCover(false);
     }
   }
 
@@ -435,8 +506,12 @@ export function WorkbenchPage() {
       const result = await runPublishTask(task.id);
       setPublishTask(result);
       if (result.status === "success") {
-        setMessage("发布成功！文章已保存到草稿箱");
-        setPublishModalVisible(false);
+        setPublishSuccessInfo({
+          visible: true,
+          articleTitle: titleInput,
+          accountName: selectedAccount.name,
+          draftUrl: result.result?.reopenUrl ?? null
+        });
       } else if (result.status === "failed") {
         const failedStep = result.steps.find((s) => s.status === "failed");
         setPublishError(failedStep?.detail ?? "发布失败");
@@ -650,7 +725,7 @@ export function WorkbenchPage() {
               value={titleInput}
               onChange={(event) => {
                 setTitleInput(event.target.value);
-                syncMetadata(event.target.value, authorInput);
+                syncMetadata(event.target.value, authorInput, digestInput);
               }}
             />
             <input
@@ -660,13 +735,76 @@ export function WorkbenchPage() {
               value={authorInput}
               onChange={(event) => {
                 setAuthorInput(event.target.value);
-                syncMetadata(titleInput, event.target.value);
+                syncMetadata(titleInput, event.target.value, digestInput);
               }}
             />
             <button className="workbench-save-btn" onClick={() => void handleSave()} disabled={isSaving}>
               {isSaving ? "保存中..." : "保存"}
             </button>
           </div>
+
+          <div className="workbench-digest-row">
+            <textarea
+              className="workbench-digest-textarea"
+              placeholder="摘要（最多120字，留空将自动提取正文首段）"
+              value={digestInput}
+              maxLength={120}
+              rows={2}
+              onChange={(event) => {
+                const val = event.target.value.slice(0, 120);
+                setDigestInput(val);
+                syncMetadata(titleInput, authorInput, val);
+              }}
+            />
+            <span className="workbench-digest-count">{digestInput.length}/120</span>
+          </div>
+
+          <div className="workbench-cover-row">
+            <div className="workbench-cover-preview">
+              {coverPreviewUrl ? (
+                <img src={coverPreviewUrl} alt="封面预览" className="workbench-cover-img" />
+              ) : (
+                <div className="workbench-cover-empty">
+                  <svg viewBox="0 0 24 24" width="24" height="24">
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2" stroke="currentColor" strokeWidth="1.5" fill="none" />
+                    <circle cx="8.5" cy="8.5" r="1.5" fill="currentColor" />
+                    <path d="M21 15l-5-5L5 21" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                  </svg>
+                  <span>封面待上传</span>
+                </div>
+              )}
+            </div>
+            <div className="workbench-cover-actions">
+              <label className="workbench-cover-btn">
+                <input
+                  type="file"
+                  accept="image/*"
+                  style={{ display: "none" }}
+                  onChange={handleCoverFileSelect}
+                />
+                {isUploadingCover ? "处理中..." : "上传封面"}
+              </label>
+              <button
+                className="workbench-cover-btn-secondary"
+                onClick={() => void handleAiGenerateCover()}
+                disabled={isUploadingCover}
+              >
+                AI 生成封面
+              </button>
+            </div>
+          </div>
+
+          {coverCropperVisible && coverCropperSrc && (
+            <CoverCropper
+              imageSrc={coverCropperSrc}
+              onCrop={handleCoverCropped}
+              onCancel={() => {
+                setCoverCropperVisible(false);
+                setCoverCropperSrc(null);
+              }}
+              defaultAspect={2.35}
+            />
+          )}
 
           <div
             className="workbench-editor-surface"
@@ -801,7 +939,7 @@ export function WorkbenchPage() {
         </aside>
       </div>
 
-      {publishModalVisible && (
+      {publishModalVisible && !publishSuccessInfo.visible && (
         <div className="publish-modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) handleClosePublishModal(); }}>
           <div className="publish-modal">
             <div className="publish-modal-header">
@@ -926,6 +1064,45 @@ export function WorkbenchPage() {
                 </>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {publishSuccessInfo.visible && (
+        <div className="publish-modal-overlay">
+          <div className="publish-success-modal">
+            <div className="publish-success-icon">
+              <svg viewBox="0 0 24 24" width="28" height="28">
+                <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+              </svg>
+            </div>
+            <h3>草稿保存成功</h3>
+            <p style={{ color: "var(--text-secondary)", fontSize: "14px", margin: "8px 0 0" }}>
+              文章 <strong style={{ color: "var(--text-primary)" }}>《{publishSuccessInfo.articleTitle}》</strong> 已保存到
+              <strong style={{ color: "var(--text-primary)" }}> {publishSuccessInfo.accountName}</strong> 的草稿箱。
+            </p>
+            <div className="publish-success-note">
+              <p>⚠️ 请打开微信公众平台，在「草稿箱」中手动确认并发布。</p>
+            </div>
+            {publishSuccessInfo.draftUrl && (
+              <a
+                href={publishSuccessInfo.draftUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="publish-success-link"
+              >
+                打开草稿编辑页
+              </a>
+            )}
+            <button
+              className="publish-success-btn"
+              onClick={() => {
+                setPublishSuccessInfo({ visible: false, articleTitle: "", accountName: "", draftUrl: null });
+                setPublishModalVisible(false);
+              }}
+            >
+              知道了
+            </button>
           </div>
         </div>
       )}

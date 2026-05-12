@@ -57,8 +57,18 @@ function sanitizeSegment(input: string): string {
   return input.replace(/[^\w\u4e00-\u9fa5-]/g, "_");
 }
 
+function stripPreviewMetaFromBody(html: string): string {
+  // Remove the preview meta block (title/author/date) — these are set via
+  // WeChat editor's dedicated input fields, not inline in the body.
+  let cleaned = html.replace(/<section[^>]*data-codex-meta="true"[^>]*>[\s\S]*?<\/section>/gi, "");
+  // Remove the template footer credit line
+  cleaned = cleaned.replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, "");
+  return cleaned;
+}
+
 function buildEditorHtml(article: ArticleRecord): string {
   if (article.renderedHtml?.trim()) {
+    let cleanedHtml = stripPreviewMetaFromBody(article.renderedHtml.trim());
     return article.mediaAssets.bodyImages.reduce((currentHtml, slot) => {
       const figurePattern = new RegExp(
         `<figure[^>]*data-codex-media-slot="${slot.id}"[^>]*>[\\s\\S]*?<\\/figure>`,
@@ -68,7 +78,7 @@ function buildEditorHtml(article: ArticleRecord): string {
         figurePattern,
         `<p data-codex-slot-marker="${slot.id}">${slot.markerToken}</p>`
       );
-    }, article.renderedHtml.trim());
+    }, cleanedHtml);
   }
 
   return article.rawMarkdown

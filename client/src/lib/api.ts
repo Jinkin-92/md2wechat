@@ -477,6 +477,28 @@ export async function testAiConnection(input: {
   return payload;
 }
 
+export async function generateCoverImage(input: {
+  articleId: string;
+  apiUrl: string;
+  apiKey: string;
+  model: string;
+}): Promise<ArticleDetail> {
+  const response = await fetch(buildApiUrl("/api/ai/generate-cover"), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(input)
+  });
+
+  const payload = await parseJsonResponse<ArticleDetail | { error: string }>(response);
+  if (!response.ok || "error" in payload) {
+    throw new Error("error" in payload ? payload.error : "封面生成失败。");
+  }
+
+  return payload;
+}
+
 export async function applySmartTypesetting(input: {
   articleId: string;
   apiUrl: string;

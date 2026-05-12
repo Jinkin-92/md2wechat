@@ -354,7 +354,6 @@ export function injectTemplateTokens(
   const platformName = (customOptions?.platformName ?? meta?.platformName)?.trim() || "";
   const originalChecked = customOptions?.originalChecked ?? meta?.originalChecked ?? false;
   const title = meta?.title?.trim() || "";
-  const todayStr = new Date().toLocaleDateString("zh-CN", { year: "numeric", month: "long", day: "numeric" });
   const metaBlock = title
       ? `<section data-codex-meta="true" style="margin:0 0 28px;padding-bottom:18px;border-bottom:4px solid ${tokens.headingColor};font-family:${tokens.fontFamily};">
 <h1 style="margin:0 0 18px;font-size:30px;line-height:1.25;color:${tokens.headingColor};font-weight:500;font-family:${tokens.h1FontFamily};">${escapeHtml(title)}</h1>
@@ -362,7 +361,6 @@ export function injectTemplateTokens(
 ${originalChecked ? '<span style="display:inline-flex;align-items:center;padding:2px 8px;border-radius:4px;background:#f2f2f2;color:#8a8a8a;">Original</span>' : ""}
 <span>${escapeHtml(author)}</span>
 ${platformName ? `<span style="color:#576174;">${escapeHtml(platformName)}</span>` : ""}
-<span>${todayStr}</span>
 </div>
 </section>`
       : "";
