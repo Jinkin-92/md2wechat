@@ -226,7 +226,9 @@ router.post("/typeset", async (req, res) => {
 async function callMinimaxImageGeneration(input: {
   apiUrl: string;
   apiKey: string;
+  model: string;
   prompt: string;
+  aspectRatio?: string;
 }): Promise<string | null> {
   const url = input.apiUrl.replace(/\/$/, "").replace(/\/v1\/messages$/, "") + "/v1/image_generation";
   const response = await fetch(url, {
@@ -236,9 +238,9 @@ async function callMinimaxImageGeneration(input: {
       Authorization: `Bearer ${input.apiKey}`
     },
     body: JSON.stringify({
-      model: "image-01",
+      model: input.model,
       prompt: input.prompt,
-      aspect_ratio: "16:9"
+      aspect_ratio: input.aspectRatio ?? "16:9"
     })
   });
 
@@ -255,12 +257,15 @@ async function callMinimaxImageGeneration(input: {
 
 router.post("/generate-cover", async (req, res) => {
   const articleId = typeof req.body.articleId === "string" ? req.body.articleId.trim() : "";
-  const apiUrl = typeof req.body.apiUrl === "string" ? req.body.apiUrl.trim() : "";
-  const apiKey = typeof req.body.apiKey === "string" ? req.body.apiKey.trim() : "";
-  const model = typeof req.body.model === "string" ? req.body.model.trim() : "MiniMax-M2.7";
+  const textApiUrl = typeof req.body.textApiUrl === "string" ? req.body.textApiUrl.trim() : "";
+  const textApiKey = typeof req.body.textApiKey === "string" ? req.body.textApiKey.trim() : "";
+  const textModel = typeof req.body.textModel === "string" ? req.body.textModel.trim() : "MiniMax-M2.7";
+  const imageApiUrl = typeof req.body.imageApiUrl === "string" ? req.body.imageApiUrl.trim() : "";
+  const imageApiKey = typeof req.body.imageApiKey === "string" ? req.body.imageApiKey.trim() : "";
+  const imageModel = typeof req.body.imageModel === "string" ? req.body.imageModel.trim() : "image-01";
 
-  if (!articleId || !apiUrl || !apiKey) {
-    return res.status(400).json({ error: "缺少 articleId、API URL 或 API Key。" });
+  if (!articleId || !textApiUrl || !textApiKey || !imageApiUrl || !imageApiKey) {
+    return res.status(400).json({ error: "缺少 articleId、文本 AI 或图像 AI 的配置参数。" });
   }
 
   const article = getArticleById(articleId);
@@ -270,9 +275,9 @@ router.post("/generate-cover", async (req, res) => {
 
   try {
     const promptText = await callAnthropicCompatible({
-      apiUrl,
-      apiKey,
-      model,
+      apiUrl: textApiUrl,
+      apiKey: textApiKey,
+      model: textModel,
       system:
         "You are a prompt engineer for image generation. Given a Chinese article title and content, generate a concise English image generation prompt (max 200 words) suitable for creating a WeChat article cover image. The prompt should be vivid, visually descriptive, and suitable for a flat illustration or high-quality photo style.",
       prompt: [
@@ -286,15 +291,18 @@ router.post("/generate-cover", async (req, res) => {
         "2. Max 200 words.",
         "3. Describe a visually striking scene that captures the essence of the article.",
         "4. Include style keywords like 'flat illustration', 'minimalist', 'high quality', 'clean background'.",
-        "5. Return ONLY the prompt text, no markdown, no quotes."
+        "5. The cover image should be landscape orientation, approximately 2.35:1 aspect ratio (900x383 pixels), suitable for WeChat Official Account.",
+        "6. Return ONLY the prompt text, no markdown, no quotes."
       ].join("\n"),
       maxTokens: 600
     });
 
     const imageBase64 = await callMinimaxImageGeneration({
-      apiUrl,
-      apiKey,
-      prompt: promptText
+      apiUrl: imageApiUrl,
+      apiKey: imageApiKey,
+      model: imageModel,
+      prompt: promptText,
+      aspectRatio: "16:9"
     });
 
     if (!imageBase64) {

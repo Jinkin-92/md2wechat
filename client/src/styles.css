@@ -2140,6 +2140,13 @@ code {
   margin: 0;
 }
 
+.settings-card-desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 4px 0 0;
+  line-height: 1.4;
+}
+
 .settings-card-body {
   padding: 16px 24px 20px;
   display: flex;
@@ -2348,6 +2355,11 @@ code {
 
 .settings-save-btn:hover {
   background: var(--blue-hover);
+}
+
+.settings-save-btn-wide {
+  width: 100%;
+  padding: 12px 28px;
 }
 
 /* ===== 2026-04 PR polish ===== */

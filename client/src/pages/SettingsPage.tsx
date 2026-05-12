@@ -4,37 +4,80 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { testAiConnection } from "../lib/api";
 import { DEFAULT_SETTINGS, readAppSettings, writeAppSettings } from "../lib/settings";
 
+const TEXT_MODEL_OPTIONS = [
+  "MiniMax-M2.7",
+  "MiniMax-Text-01",
+  "claude-3-5-sonnet-20241022",
+  "claude-3-opus-20240229",
+  "gpt-4o",
+  "gpt-4o-mini"
+];
+
+const IMAGE_MODEL_OPTIONS = [
+  "image-01",
+  "kling-image",
+  "dall-e-3",
+  "flux-schnell"
+];
+
 export function SettingsPage() {
   const navigate = useNavigate();
   const location = useLocation();
-  const [apiUrl, setApiUrl] = useState(DEFAULT_SETTINGS.apiUrl);
-  const [apiKey, setApiKey] = useState(DEFAULT_SETTINGS.apiKey);
+
+  // Text AI
+  const [textApiUrl, setTextApiUrl] = useState(DEFAULT_SETTINGS.textApiUrl);
+  const [textApiKey, setTextApiKey] = useState(DEFAULT_SETTINGS.textApiKey);
+  const [textModel, setTextModel] = useState(DEFAULT_SETTINGS.textModel);
+
+  // Image AI
+  const [imageApiUrl, setImageApiUrl] = useState(DEFAULT_SETTINGS.imageApiUrl);
+  const [imageApiKey, setImageApiKey] = useState(DEFAULT_SETTINGS.imageApiKey);
+  const [imageModel, setImageModel] = useState(DEFAULT_SETTINGS.imageModel);
+
+  // Platform
   const [platformName, setPlatformName] = useState(DEFAULT_SETTINGS.platformName);
   const [originalChecked, setOriginalChecked] = useState(DEFAULT_SETTINGS.originalChecked);
+
   const [message, setMessage] = useState("");
   const [isTesting, setIsTesting] = useState(false);
 
   useEffect(() => {
     const settings = readAppSettings();
-    setApiUrl(settings.apiUrl);
-    setApiKey(settings.apiKey);
+    setTextApiUrl(settings.textApiUrl);
+    setTextApiKey(settings.textApiKey);
+    setTextModel(settings.textModel);
+    setImageApiUrl(settings.imageApiUrl);
+    setImageApiKey(settings.imageApiKey);
+    setImageModel(settings.imageModel);
     setPlatformName(settings.platformName);
     setOriginalChecked(settings.originalChecked);
   }, []);
 
   function handleSave() {
-    writeAppSettings({ apiUrl, apiKey, platformName, originalChecked });
+    writeAppSettings({
+      textApiUrl,
+      textApiKey,
+      textModel,
+      imageApiUrl,
+      imageApiKey,
+      imageModel,
+      platformName,
+      originalChecked
+    });
     setMessage("设置已保存");
     setTimeout(() => setMessage(""), 2500);
   }
 
-  async function handleTest() {
+  async function handleTestTextAi() {
     setIsTesting(true);
     setMessage("");
     try {
-      const settings = writeAppSettings({ apiUrl, apiKey });
-      const payload = await testAiConnection(settings);
-      setMessage(payload.message.includes("CONNECTED") ? "连接测试成功" : payload.message);
+      const payload = await testAiConnection({
+        apiUrl: textApiUrl,
+        apiKey: textApiKey,
+        model: textModel
+      });
+      setMessage(payload.message.includes("CONNECTED") ? "文本 AI 连接测试成功" : payload.message);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "连接测试失败");
     } finally {
@@ -57,9 +100,11 @@ export function SettingsPage() {
       </div>
 
       <div className="settings-body">
+        {/* Text AI */}
         <div className="settings-card">
           <div className="settings-card-header">
-            <h2 className="settings-card-title">智能排版连接</h2>
+            <h2 className="settings-card-title">智能排版 AI（文本模型）</h2>
+            <p className="settings-card-desc">用于智能排版、生成摘要、生成封面提示词</p>
           </div>
           <div className="settings-card-body">
             <div className="settings-field">
@@ -67,8 +112,9 @@ export function SettingsPage() {
               <input
                 type="text"
                 className="settings-input"
-                value={apiUrl}
-                onChange={(event) => setApiUrl(event.target.value)}
+                placeholder="https://api.minimaxi.com/anthropic"
+                value={textApiUrl}
+                onChange={(event) => setTextApiUrl(event.target.value)}
               />
             </div>
             <div className="settings-field">
@@ -77,22 +123,73 @@ export function SettingsPage() {
                 type="password"
                 className="settings-input"
                 placeholder="sk-..."
-                value={apiKey}
-                onChange={(event) => setApiKey(event.target.value)}
+                value={textApiKey}
+                onChange={(event) => setTextApiKey(event.target.value)}
               />
             </div>
+            <div className="settings-field">
+              <label className="settings-field-label">模型</label>
+              <select
+                className="settings-select"
+                value={textModel}
+                onChange={(event) => setTextModel(event.target.value)}
+              >
+                {TEXT_MODEL_OPTIONS.map((m) => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
+            </div>
             <div className="settings-save-row settings-save-row-left">
-              <button className="settings-account-btn" onClick={() => void handleTest()} disabled={isTesting}>
+              <button className="settings-account-btn" onClick={() => void handleTestTextAi()} disabled={isTesting}>
                 {isTesting ? "测试中..." : "连接测试"}
               </button>
-              <button className="settings-save-btn" onClick={handleSave}>
-                保存设置
-              </button>
             </div>
-            {message ? <span className="settings-inline-message">{message}</span> : null}
           </div>
         </div>
 
+        {/* Image AI */}
+        <div className="settings-card">
+          <div className="settings-card-header">
+            <h2 className="settings-card-title">图像生成 AI</h2>
+            <p className="settings-card-desc">用于 AI 生成公众号封面图</p>
+          </div>
+          <div className="settings-card-body">
+            <div className="settings-field">
+              <label className="settings-field-label">API URL</label>
+              <input
+                type="text"
+                className="settings-input"
+                placeholder="https://api.minimaxi.com"
+                value={imageApiUrl}
+                onChange={(event) => setImageApiUrl(event.target.value)}
+              />
+            </div>
+            <div className="settings-field">
+              <label className="settings-field-label">API Key</label>
+              <input
+                type="password"
+                className="settings-input"
+                placeholder="sk-..."
+                value={imageApiKey}
+                onChange={(event) => setImageApiKey(event.target.value)}
+              />
+            </div>
+            <div className="settings-field">
+              <label className="settings-field-label">模型</label>
+              <select
+                className="settings-select"
+                value={imageModel}
+                onChange={(event) => setImageModel(event.target.value)}
+              >
+                {IMAGE_MODEL_OPTIONS.map((m) => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {/* Platform */}
         <div className="settings-card">
           <div className="settings-card-header">
             <h2 className="settings-card-title">公众号信息</h2>
@@ -119,12 +216,14 @@ export function SettingsPage() {
                 <span className="settings-toggle-slider" />
               </label>
             </div>
-            <div className="settings-save-row settings-save-row-left">
-              <button className="settings-save-btn" onClick={handleSave}>
-                保存设置
-              </button>
-            </div>
           </div>
+        </div>
+
+        <div className="settings-save-row">
+          <button className="settings-save-btn settings-save-btn-wide" onClick={handleSave}>
+            保存全部设置
+          </button>
+          {message ? <span className="settings-inline-message">{message}</span> : null}
         </div>
       </div>
     </div>

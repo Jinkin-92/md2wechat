@@ -321,8 +321,8 @@ export function WorkbenchPage() {
     if (!selectedArticleId) return;
 
     const settings = readAppSettings();
-    if (!settings.apiKey.trim()) {
-      setError("请先在设置页填写 Minimax API Key");
+    if (!settings.textApiKey.trim()) {
+      setError("请先在设置页填写智能排版 AI 的 API Key");
       return;
     }
 
@@ -332,9 +332,9 @@ export function WorkbenchPage() {
     try {
       const payload = await applySmartTypesetting({
         articleId: selectedArticleId,
-        apiUrl: settings.apiUrl,
-        apiKey: settings.apiKey,
-        model: settings.model
+        apiUrl: settings.textApiUrl,
+        apiKey: settings.textApiKey,
+        model: settings.textModel
       });
       setArticle(payload);
       setTitleInput(payload.title);
@@ -381,8 +381,12 @@ export function WorkbenchPage() {
   async function handleAiGenerateCover() {
     if (!selectedArticleId) return;
     const settings = readAppSettings();
-    if (!settings.apiKey.trim()) {
-      setError("请先在设置页填写 Minimax API Key");
+    if (!settings.textApiKey.trim()) {
+      setError("请先在设置页填写智能排版 AI 的 API Key");
+      return;
+    }
+    if (!settings.imageApiKey.trim()) {
+      setError("请先在设置页填写图像生成 AI 的 API Key");
       return;
     }
     setIsUploadingCover(true);
@@ -391,9 +395,12 @@ export function WorkbenchPage() {
     try {
       const payload = await generateCoverImage({
         articleId: selectedArticleId,
-        apiUrl: settings.apiUrl,
-        apiKey: settings.apiKey,
-        model: settings.model
+        textApiUrl: settings.textApiUrl,
+        textApiKey: settings.textApiKey,
+        textModel: settings.textModel,
+        imageApiUrl: settings.imageApiUrl,
+        imageApiKey: settings.imageApiKey,
+        imageModel: settings.imageModel
       });
       setArticle(payload);
       setMessage("AI 封面生成成功");
@@ -407,8 +414,8 @@ export function WorkbenchPage() {
   async function handleAiGenerateDigest() {
     if (!selectedArticleId) return;
     const settings = readAppSettings();
-    if (!settings.apiKey.trim()) {
-      setError("请先在设置页填写 Minimax API Key");
+    if (!settings.textApiKey.trim()) {
+      setError("请先在设置页填写智能排版 AI 的 API Key");
       return;
     }
     setIsTypesetting(true);
@@ -417,9 +424,9 @@ export function WorkbenchPage() {
     try {
       const payload = await generateDigest({
         articleId: selectedArticleId,
-        apiUrl: settings.apiUrl,
-        apiKey: settings.apiKey,
-        model: settings.model
+        apiUrl: settings.textApiUrl,
+        apiKey: settings.textApiKey,
+        model: settings.textModel
       });
       setArticle(payload);
       setDigestInput(payload.metadata.digest);

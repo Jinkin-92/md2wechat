@@ -479,9 +479,12 @@ export async function testAiConnection(input: {
 
 export async function generateCoverImage(input: {
   articleId: string;
-  apiUrl: string;
-  apiKey: string;
-  model: string;
+  textApiUrl: string;
+  textApiKey: string;
+  textModel: string;
+  imageApiUrl: string;
+  imageApiKey: string;
+  imageModel: string;
 }): Promise<ArticleDetail> {
   const response = await fetch(buildApiUrl("/api/ai/generate-cover"), {
     method: "POST",
