@@ -333,4 +333,61 @@ router.post("/generate-cover", async (req, res) => {
   }
 });
 
+router.post("/generate-digest", async (req, res) => {
+  const articleId = typeof req.body.articleId === "string" ? req.body.articleId.trim() : "";
+  const apiUrl = typeof req.body.apiUrl === "string" ? req.body.apiUrl.trim() : "";
+  const apiKey = typeof req.body.apiKey === "string" ? req.body.apiKey.trim() : "";
+  const model = typeof req.body.model === "string" ? req.body.model.trim() : "MiniMax-M2.7";
+
+  if (!articleId || !apiUrl || !apiKey) {
+    return res.status(400).json({ error: "缺少 articleId、API URL 或 API Key。" });
+  }
+
+  const article = getArticleById(articleId);
+  if (!article) {
+    return res.status(404).json({ error: "未找到对应的文章。" });
+  }
+
+  try {
+    const markdownForAi = stripBase64Images(article.rawMarkdown);
+    const responseText = await callAnthropicCompatible({
+      apiUrl,
+      apiKey,
+      model,
+      system:
+        "You are a Chinese WeChat article editor. Given an article title and content, write a concise and engaging 40-80 character Chinese digest (summary) suitable for a WeChat article cover card. Do not fabricate facts. Return strict JSON with key digest only.",
+      prompt: [
+        "请为下面这篇中文文章生成一段 40-80 字的公众号摘要。",
+        "要求：",
+        "1. 准确概括文章核心观点，不编造事实。",
+        "2. 语言简洁、有吸引力，适合作为公众号推文摘要。",
+        "3. 返回严格 JSON 格式，仅包含 digest 字段。",
+        "",
+        `标题：${article.title}`,
+        `作者：${article.metadata.author || "未填写"}`,
+        "",
+        markdownForAi.slice(0, 2000)
+      ].join("\n"),
+      maxTokens: 400
+    });
+
+    const parsed = extractJsonBlock(responseText);
+    const nextDigest = parsed.digest?.trim() || article.metadata.digest;
+
+    const updatedArticle = updateArticle({
+      ...article,
+      metadata: {
+        ...article.metadata,
+        digest: nextDigest
+      }
+    });
+
+    return res.json(updatedArticle);
+  } catch (error) {
+    return res.status(502).json({
+      error: error instanceof Error ? error.message : "摘要生成失败。"
+    });
+  }
+});
+
 export default router;

@@ -3970,3 +3970,38 @@ code {
 .cover-cropper-btn-primary:hover {
   background: var(--blue-hover);
 }
+
+/* Digest AI generate button */
+.workbench-digest-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  padding-bottom: 2px;
+}
+
+.workbench-digest-ai-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 12px;
+  border-radius: 980px;
+  border: 1px solid var(--blue);
+  background: transparent;
+  color: var(--blue);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.12s;
+  white-space: nowrap;
+}
+
+.workbench-digest-ai-btn:hover {
+  background: var(--blue);
+  color: #fff;
+}
+
+.workbench-digest-ai-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

@@ -8,6 +8,7 @@ import {
   checkWechatQrLogin,
   createPublishTask,
   generateCoverImage,
+  generateDigest,
   getArticle,
   getArticles,
   getPublishAccounts,
@@ -403,6 +404,33 @@ export function WorkbenchPage() {
     }
   }
 
+  async function handleAiGenerateDigest() {
+    if (!selectedArticleId) return;
+    const settings = readAppSettings();
+    if (!settings.apiKey.trim()) {
+      setError("请先在设置页填写 Minimax API Key");
+      return;
+    }
+    setIsTypesetting(true);
+    setMessage("");
+    setError("");
+    try {
+      const payload = await generateDigest({
+        articleId: selectedArticleId,
+        apiUrl: settings.apiUrl,
+        apiKey: settings.apiKey,
+        model: settings.model
+      });
+      setArticle(payload);
+      setDigestInput(payload.metadata.digest);
+      setMessage("AI 摘要生成成功");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "AI 摘要生成失败");
+    } finally {
+      setIsTypesetting(false);
+    }
+  }
+
   function handleCopyHtml() {
     if (!article?.renderedHtml) return;
     void navigator.clipboard.writeText(article.renderedHtml).then(() => {
@@ -756,7 +784,17 @@ export function WorkbenchPage() {
                 syncMetadata(titleInput, authorInput, val);
               }}
             />
-            <span className="workbench-digest-count">{digestInput.length}/120</span>
+            <div className="workbench-digest-actions">
+              <button
+                className="workbench-digest-ai-btn"
+                onClick={() => void handleAiGenerateDigest()}
+                disabled={isTypesetting}
+                title="AI 根据正文生成摘要"
+              >
+                {isTypesetting ? "生成中..." : "AI 生成"}
+              </button>
+              <span className="workbench-digest-count">{digestInput.length}/120</span>
+            </div>
           </div>
 
           <div className="workbench-cover-row">
