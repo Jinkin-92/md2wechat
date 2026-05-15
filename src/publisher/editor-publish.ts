@@ -435,15 +435,27 @@ async function moveUploadedImageToAnchor(
       }
 
       const imageBlock = image.closest("figure, section, p, div") ?? image;
-      const replacement = document.createElement("p");
-      replacement.style.textAlign = "center";
-      replacement.innerHTML = image.outerHTML;
 
+      // Remove the marker text from its node
       textNode.textContent = textNode.textContent?.replace(placeholderPattern, "").trim() ?? "";
-      anchor.replaceWith(replacement);
-      if (imageBlock instanceof HTMLElement) {
-        imageBlock.remove();
+
+      // If the anchor paragraph becomes empty, keep a <br> so ProseMirror
+      // doesn't collapse or remove the paragraph unexpectedly.
+      if (
+        anchor instanceof HTMLElement &&
+        anchor.tagName === "P" &&
+        anchor.textContent?.trim() === ""
+      ) {
+        anchor.innerHTML = "<br>";
       }
+
+      // Move the image block to right after the anchor paragraph.
+      // Inserting preserves the surrounding document structure and is
+      // more ProseMirror-friendly than replacing the whole anchor.
+      if (anchor.parentNode) {
+        anchor.parentNode.insertBefore(imageBlock, anchor.nextSibling);
+      }
+
       node.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertFromPaste" }));
       node.dispatchEvent(new Event("change", { bubbles: true }));
       return true;
@@ -483,6 +495,26 @@ async function uploadImageIntoBody(page: Page, editorSelector: string, filePath:
   if (!uploadInput) {
     throw new Error("未找到正文图片上传控件。");
   }
+
+  // Focus editor and move caret to the end so uploaded images land at a
+  // predictable location (the bottom). They will be moved to their correct
+  // positions by moveUploadedImageToAnchor afterwards.
+  await page.evaluate(function (selector) {
+    const editor = document.querySelector(selector);
+    if (!(editor instanceof HTMLElement)) {
+      return;
+    }
+    editor.focus();
+    const selection = window.getSelection();
+    if (selection) {
+      const range = document.createRange();
+      range.selectNodeContents(editor);
+      range.collapse(false);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+  }, editorSelector);
+
   const beforeCount = await page.$eval(editorSelector, (node) =>
     node instanceof HTMLElement ? node.querySelectorAll("img.js_insertlocalimg").length : 0
   );
@@ -650,56 +682,20 @@ async function insertBodyImagesAtPlaceholders(
   const insertedBodyImagePaths: string[] = [];
   const missingPlaceholders: string[] = [];
 
-  for (const slot of bodySlots) {
-    // 1. Locate the marker text in the editor and select it
-    const markerFound = await page.evaluate(
-      function (selector, token) {
-        const editor = document.querySelector(selector);
-        if (!editor) {
-          return false;
-        }
-        const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
-        while (walker.nextNode()) {
-          const node = walker.currentNode;
-          const idx = node.textContent ? node.textContent.indexOf(token) : -1;
-          if (idx >= 0) {
-            const range = document.createRange();
-            range.setStart(node, idx);
-            range.setEnd(node, idx + token.length);
-            const sel = window.getSelection();
-            if (sel) {
-              sel.removeAllRanges();
-              sel.addRange(range);
-            }
-            if (editor instanceof HTMLElement) {
-              editor.focus();
-            }
-            return true;
-          }
-        }
-        return false;
-      },
-      editorSelector,
-      slot.markerToken
-    );
+  // Process slots in reverse order so that earlier markers are not
+  // shifted or invalidated when later images are moved into place.
+  const reversedSlots = [...bodySlots].reverse();
 
-    if (!markerFound) {
-      missingPlaceholders.push(slot.label);
-      continue;
-    }
-
-    // 2. Delete the marker so the cursor sits at the intended insertion point
-    await page.keyboard.press("Delete");
-    await sleep(200);
-
-    // 3. Upload the image — WeChat inserts it at the current cursor position
+  for (const slot of reversedSlots) {
     const imageIdentifier = await uploadImageIntoBody(page, editorSelector, slot.filePath);
-    if (!imageIdentifier) {
+    const moved = await moveUploadedImageToAnchor(page, editorSelector, imageIdentifier, slot.markerToken);
+    if (!moved) {
       missingPlaceholders.push(slot.label);
       continue;
     }
-
     insertedBodyImagePaths.push(slot.filePath);
+    // Give ProseMirror a moment to settle after each DOM mutation
+    await sleep(400);
   }
 
   return {
