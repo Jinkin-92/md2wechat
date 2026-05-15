@@ -27,13 +27,13 @@ function createTestApp() {
     return res.json(article);
   });
 
-  app.post("/api/articles/upload", testUpload.single("file"), (req, res) => {
+  app.post("/api/articles/upload", testUpload.single("file"), async (req, res) => {
     const file = req.file;
     if (!file) return res.status(400).json({ error: "请先选择一个 Markdown 文件。" });
     const supportedExts = [".md", ".txt"];
     const ext = supportedExts.find((e) => file.originalname.toLowerCase().endsWith(e));
     if (!ext) return res.status(400).json({ error: "当前仅支持上传 .md 或 .txt 文件。" });
-    const article = createArticleFromUpload({ sourceFileName: file.originalname, markdown: file.buffer.toString("utf8") });
+    const article = await createArticleFromUpload({ sourceFileName: file.originalname, markdown: file.buffer.toString("utf8") });
     return res.status(201).json(article);
   });
 

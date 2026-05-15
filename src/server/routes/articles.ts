@@ -8,6 +8,7 @@ import {
   extractDocxImages,
   getArticleById,
   getArticleBySourceFileName,
+  importArticleFromLocalPath,
   listArticles,
   saveArticleAsset,
   updateArticle
@@ -30,7 +31,7 @@ router.get("/", (_req, res) => {
   });
 });
 
-router.get("/default-preview", (req, res) => {
+router.get("/default-preview", async (_req, res) => {
   const previewFileName = "产业观察_算力交叉点_v6 (1).md";
   const existingArticle = getArticleBySourceFileName(previewFileName);
 
@@ -46,7 +47,7 @@ router.get("/default-preview", (req, res) => {
   }
 
   const markdown = fs.readFileSync(absolutePath, "utf8");
-  const article = createArticleFromUpload({
+  const article = await createArticleFromUpload({
     sourceFileName: previewFileName,
     markdown
   });
@@ -264,11 +265,30 @@ router.post("/upload", upload.single("file"), async (req, res) => {
     });
   }
 
-  const article = createArticleFromUpload({
+  const article = await createArticleFromUpload({
     sourceFileName: file.originalname,
     markdown,
     docxImages
   });
+
+  return res.status(201).json(article);
+});
+
+router.post("/import-local", async (req, res) => {
+  const filePath = typeof req.body.filePath === "string" ? req.body.filePath.trim() : "";
+
+  if (!filePath) {
+    return res.status(400).json({ error: "缺少 filePath 参数。" });
+  }
+
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ error: `文件不存在：${filePath}` });
+  }
+
+  const article = await importArticleFromLocalPath(filePath);
+  if (!article) {
+    return res.status(500).json({ error: "导入失败，无法创建文章。" });
+  }
 
   return res.status(201).json(article);
 });

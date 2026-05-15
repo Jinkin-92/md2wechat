@@ -10,6 +10,8 @@ import type {
   ArticleSummary
 } from "../shared/types.js";
 import JSZip from "jszip";
+import https from "node:https";
+import http from "node:http";
 
 const ARTICLES_DIR = path.resolve(process.cwd(), "data/articles");
 const UPLOADS_DIR = path.resolve(process.cwd(), "data/uploads");
@@ -94,6 +96,156 @@ function extractImagePlaceholders(rawMarkdown: string): string[] {
   );
 }
 
+function extractMarkdownImages(rawMarkdown: string): Array<{ alt: string; url: string }> {
+  const matches = [...rawMarkdown.matchAll(/!\[([^\]]*)\]\(([^)]+)\)/g)];
+  return matches.map((match) => ({
+    alt: match[1] || "",
+    url: match[2].trim()
+  }));
+}
+
+function isExternalImageUrl(url: string): boolean {
+  return /^https?:\/\//i.test(url);
+}
+
+async function downloadImageToFile(url: string, targetPath: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const client = url.startsWith("https:") ? https : http;
+    const file = fs.createWriteStream(targetPath);
+    const request = client.get(url, { timeout: 30000 }, (response) => {
+      if (response.statusCode && response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+        // Follow redirect
+        downloadImageToFile(response.headers.location, targetPath).then(resolve);
+        return;
+      }
+      if (!response.statusCode || response.statusCode < 200 || response.statusCode >= 300) {
+        resolve(false);
+        return;
+      }
+      response.pipe(file);
+      file.on("finish", () => {
+        file.close();
+        resolve(true);
+      });
+    });
+    request.on("error", () => {
+      try { file.close(); } catch { /* ignore */ }
+      resolve(false);
+    });
+    request.on("timeout", () => {
+      request.destroy();
+      try { file.close(); } catch { /* ignore */ }
+      resolve(false);
+    });
+  });
+}
+
+function resolveLocalImagePath(imagePath: string, sourceDir?: string): string | null {
+  // If it's already an absolute path and exists
+  if (path.isAbsolute(imagePath) && fs.existsSync(imagePath)) {
+    return imagePath;
+  }
+
+  // Try relative to sourceDir (the markdown file's directory)
+  if (sourceDir) {
+    const relativeToSource = path.resolve(sourceDir, imagePath);
+    if (fs.existsSync(relativeToSource)) {
+      return relativeToSource;
+    }
+  }
+
+  // Try relative to current working directory
+  const relativeToCwd = path.resolve(process.cwd(), imagePath);
+  if (fs.existsSync(relativeToCwd)) {
+    return relativeToCwd;
+  }
+
+  // Try relative to uploads directory
+  const relativeToUploads = path.resolve(UPLOADS_DIR, imagePath);
+  if (fs.existsSync(relativeToUploads)) {
+    return relativeToUploads;
+  }
+
+  return null;
+}
+
+async function processMarkdownImages(
+  markdown: string,
+  articleId: string,
+  sourceDir?: string
+): Promise<{ markdown: string; bodyImages: ArticleBodyImageAsset[] }> {
+  ensureStorageDirs();
+  const assetDir = getArticleAssetDir(articleId);
+  fs.mkdirSync(assetDir, { recursive: true });
+
+  const images = extractMarkdownImages(markdown);
+  if (images.length === 0) {
+    return { markdown, bodyImages: [] };
+  }
+
+  let processedMarkdown = markdown;
+  const bodyImages: ArticleBodyImageAsset[] = [];
+
+  for (let i = 0; i < images.length; i++) {
+    const { alt, url } = images[i];
+    const slotId = `slot_${i + 1}`;
+    const placeholderText = alt ? `${alt} ${i + 1}` : `图片 ${i + 1}`;
+    const placeholder = `【${placeholderText}】`;
+    const label = alt ? `${alt} ${i + 1}` : `正文图片 ${i + 1}`;
+    const markerToken = `[[MD2WECHAT_IMAGE_${slotId.toUpperCase()}]]`;
+
+    let absolutePath: string | null = null;
+    let storageKey: string | null = null;
+
+    if (isExternalImageUrl(url)) {
+      // Download external image
+      const ext = path.extname(new URL(url).pathname) || ".jpg";
+      const targetName = `${Date.now()}-${i + 1}${ext}`;
+      const targetPath = path.join(assetDir, targetName);
+      const success = await downloadImageToFile(url, targetPath);
+      if (success && fs.existsSync(targetPath)) {
+        absolutePath = targetPath;
+        storageKey = path.relative(getAppConfig().dataDir, targetPath).replace(/\\/g, "/");
+      }
+    } else {
+      // Resolve local image path
+      const localPath = resolveLocalImagePath(url, sourceDir);
+      if (localPath) {
+        const ext = path.extname(localPath) || ".png";
+        const targetName = `${Date.now()}-${i + 1}${ext}`;
+        const targetPath = path.join(assetDir, targetName);
+        try {
+          fs.copyFileSync(localPath, targetPath);
+          absolutePath = targetPath;
+          storageKey = path.relative(getAppConfig().dataDir, targetPath).replace(/\\/g, "/");
+        } catch {
+          absolutePath = null;
+          storageKey = null;
+        }
+      }
+    }
+
+    bodyImages.push({
+      id: slotId,
+      placeholder,
+      label,
+      markerToken,
+      localPath: absolutePath,
+      storageKey
+    });
+
+    // Replace the markdown image syntax with a placeholder.
+    // Use non-global replace so each occurrence of the same URL gets a unique slot.
+    const escapedUrl = url.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const imagePattern = new RegExp(
+      `!\\[[^\\]]*\\]\\(${escapedUrl}\\)`
+    );
+    processedMarkdown = processedMarkdown.replace(imagePattern, placeholder);
+  }
+
+  return { markdown: processedMarkdown, bodyImages };
+}
+
 export async function extractDocxImages(docxBuffer: Buffer): Promise<Buffer[]> {
   try {
     const zip = await JSZip.loadAsync(docxBuffer);
@@ -136,13 +288,20 @@ function buildDefaultMediaAssets(
   articleId: string,
   markdown: string,
   persistAssets = false,
-  docxImages: Buffer[] = []
+  docxImages: Buffer[] = [],
+  existingBodyImages?: ArticleBodyImageAsset[]
 ): ArticleMediaAssets {
   const placeholders = extractImagePlaceholders(markdown);
   const bodyImages = placeholders.map((placeholder, index) =>
     createBodyImageAsset(articleId, placeholder, index, persistAssets)
   );
-  const coverSourcePath = resolveSeedImagePath(String(placeholders.length + 1));
+
+  // Merge existing body images (from processed markdown images) at the beginning
+  const mergedBodyImages = existingBodyImages && existingBodyImages.length > 0
+    ? [...existingBodyImages, ...bodyImages]
+    : bodyImages;
+
+  const coverSourcePath = resolveSeedImagePath(String(mergedBodyImages.length + 1));
   const storedCover =
     coverSourcePath && persistAssets ? persistSeedAsset(articleId, coverSourcePath) : null;
 
@@ -154,14 +313,10 @@ function buildDefaultMediaAssets(
       const absolutePath = path.join(getArticleAssetDir(articleId), targetName);
       fs.writeFileSync(absolutePath, imgBuffer);
       const storageKey = path.relative(getAppConfig().dataDir, absolutePath).replace(/\\/g, "/");
-      const matchedSlot = bodyImages.find((slot, idx) => {
-        const slotPlaceholder = slot.placeholder;
-        return slotPlaceholder && idx === i;
-      });
-      if (bodyImages[i]) {
-        bodyImages[i] = { ...bodyImages[i], localPath: absolutePath, storageKey };
+      if (mergedBodyImages[i]) {
+        mergedBodyImages[i] = { ...mergedBodyImages[i], localPath: absolutePath, storageKey };
       } else {
-        bodyImages.push({
+        mergedBodyImages.push({
           id: `slot_${i + 1}`,
           placeholder: `【图片 ${i + 1}】`,
           label: `正文图片 ${i + 1}`,
@@ -176,7 +331,7 @@ function buildDefaultMediaAssets(
   return {
     coverLocalPath: storedCover?.absolutePath ?? coverSourcePath ?? null,
     coverStorageKey: storedCover?.storageKey ?? null,
-    bodyImages
+    bodyImages: mergedBodyImages
   };
 }
 
@@ -304,11 +459,12 @@ export function getStoredAssetPublicUrl(storageKey: string | null): string | nul
   return `/data/${storageKey.replace(/\\/g, "/")}`;
 }
 
-export function createArticleFromUpload(input: {
+export async function createArticleFromUpload(input: {
   sourceFileName: string;
   markdown: string;
   docxImages?: Buffer[];
-}): ArticleRecord {
+  sourceDir?: string;
+}): Promise<ArticleRecord> {
   ensureStorageDirs();
 
   const id = `art_${Date.now()}_${randomUUID().slice(0, 8)}`;
@@ -317,13 +473,20 @@ export function createArticleFromUpload(input: {
   const safeFileName = sanitizeFileName(normalizedSourceFileName);
   const uploadFilePath = path.join(UPLOADS_DIR, `${id}-${safeFileName}`);
 
-  fs.writeFileSync(uploadFilePath, input.markdown, "utf8");
+  // Process markdown images: download external images, copy local images
+  const { markdown: processedMarkdown, bodyImages } = await processMarkdownImages(
+    input.markdown,
+    id,
+    input.sourceDir
+  );
+
+  fs.writeFileSync(uploadFilePath, processedMarkdown, "utf8");
 
   const article: ArticleRecord = {
     id,
-    title: deriveTitle(input.markdown, normalizedSourceFileName),
+    title: deriveTitle(processedMarkdown, normalizedSourceFileName),
     sourceFileName: normalizedSourceFileName,
-    rawMarkdown: input.markdown,
+    rawMarkdown: processedMarkdown,
     templateId: null,
     renderedHtml: null,
     coverImage: {
@@ -333,10 +496,10 @@ export function createArticleFromUpload(input: {
     metadata: {
       author: "",
       digest: "",
-      wordCount: countWords(input.markdown),
+      wordCount: countWords(processedMarkdown),
       originalChecked: false
     },
-    mediaAssets: buildDefaultMediaAssets(id, input.markdown, true, input.docxImages ?? []),
+    mediaAssets: buildDefaultMediaAssets(id, processedMarkdown, true, input.docxImages ?? [], bodyImages),
     status: "draft",
     createdAt: now,
     updatedAt: now
@@ -344,6 +507,22 @@ export function createArticleFromUpload(input: {
 
   saveArticle(article);
   return article;
+}
+
+export async function importArticleFromLocalPath(filePath: string): Promise<ArticleRecord | null> {
+  if (!fs.existsSync(filePath)) {
+    return null;
+  }
+
+  const markdown = fs.readFileSync(filePath, "utf8");
+  const sourceDir = path.dirname(filePath);
+  const sourceFileName = path.basename(filePath);
+
+  return createArticleFromUpload({
+    sourceFileName,
+    markdown,
+    sourceDir
+  });
 }
 
 export function getArticleBySourceFileName(sourceFileName: string): ArticleRecord | null {
