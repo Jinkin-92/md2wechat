@@ -53,7 +53,7 @@ export async function ensureWechatLogin(account: PublishAccount): Promise<Publis
 
     await page.goto(config.wechatBaseUrl, {
       waitUntil: "networkidle2",
-      timeout: 30000
+      timeout: 60000
     });
 
     const pageTitle = await page.title();

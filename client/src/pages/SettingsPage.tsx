@@ -1,24 +1,23 @@
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
-import { testAiConnection } from "../lib/api";
+import { testAiConnection, testImageAiConnection } from "../lib/api";
 import { DEFAULT_SETTINGS, readAppSettings, writeAppSettings } from "../lib/settings";
 
-const TEXT_MODEL_OPTIONS = [
-  "MiniMax-M2.7",
-  "MiniMax-Text-01",
-  "claude-3-5-sonnet-20241022",
-  "claude-3-opus-20240229",
-  "gpt-4o",
-  "gpt-4o-mini"
-];
-
-const IMAGE_MODEL_OPTIONS = [
-  "image-01",
-  "kling-image",
-  "dall-e-3",
-  "flux-schnell"
-];
+function ModelInput(props: { label: string; value: string; onChange: (value: string) => void }) {
+  return (
+    <div className="settings-field">
+      <label className="settings-field-label">{props.label}</label>
+      <input
+        type="text"
+        className="settings-input"
+        placeholder="手动填写模型名称"
+        value={props.value}
+        onChange={(event) => props.onChange(event.target.value)}
+      />
+    </div>
+  );
+}
 
 export function SettingsPage() {
   const navigate = useNavigate();
@@ -51,7 +50,8 @@ export function SettingsPage() {
     setImageModel(settings.imageModel);
     setPlatformName(settings.platformName);
     setOriginalChecked(settings.originalChecked);
-  }, []);
+
+    }, []);
 
   function handleSave() {
     writeAppSettings({
@@ -80,6 +80,23 @@ export function SettingsPage() {
       setMessage(payload.message.includes("CONNECTED") ? "文本 AI 连接测试成功" : payload.message);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "连接测试失败");
+    } finally {
+      setIsTesting(false);
+    }
+  }
+
+  async function handleTestImageAi() {
+    setIsTesting(true);
+    setMessage("");
+    try {
+      const payload = await testImageAiConnection({
+        apiUrl: imageApiUrl,
+        apiKey: imageApiKey,
+        model: imageModel
+      });
+      setMessage(payload.message.includes("CONNECTED") ? "图像 AI 连接测试成功" : payload.message);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "图像 AI 连接测试失败");
     } finally {
       setIsTesting(false);
     }
@@ -127,18 +144,11 @@ export function SettingsPage() {
                 onChange={(event) => setTextApiKey(event.target.value)}
               />
             </div>
-            <div className="settings-field">
-              <label className="settings-field-label">模型</label>
-              <select
-                className="settings-select"
-                value={textModel}
-                onChange={(event) => setTextModel(event.target.value)}
-              >
-                {TEXT_MODEL_OPTIONS.map((m) => (
-                  <option key={m} value={m}>{m}</option>
-                ))}
-              </select>
-            </div>
+            <ModelInput
+              label="模型"
+              value={textModel}
+              onChange={setTextModel}
+            />
             <div className="settings-save-row settings-save-row-left">
               <button className="settings-account-btn" onClick={() => void handleTestTextAi()} disabled={isTesting}>
                 {isTesting ? "测试中..." : "连接测试"}
@@ -174,17 +184,15 @@ export function SettingsPage() {
                 onChange={(event) => setImageApiKey(event.target.value)}
               />
             </div>
-            <div className="settings-field">
-              <label className="settings-field-label">模型</label>
-              <select
-                className="settings-select"
-                value={imageModel}
-                onChange={(event) => setImageModel(event.target.value)}
-              >
-                {IMAGE_MODEL_OPTIONS.map((m) => (
-                  <option key={m} value={m}>{m}</option>
-                ))}
-              </select>
+            <ModelInput
+              label="模型"
+              value={imageModel}
+              onChange={setImageModel}
+            />
+            <div className="settings-save-row settings-save-row-left">
+              <button className="settings-account-btn" onClick={() => void handleTestImageAi()} disabled={isTesting}>
+                {isTesting ? "测试中..." : "连接测试"}
+              </button>
             </div>
           </div>
         </div>

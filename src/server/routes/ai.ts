@@ -120,6 +120,82 @@ function extractJsonBlock(text: string): { markdown?: string; digest?: string } 
   }
 }
 
+const FALLBACK_MODELS: Record<string, Record<string, string[]>> = {
+  "minimaxi.com": {
+    text: ["MiniMax-M2.7", "MiniMax-Text-01", "MiniMax-01", "abab6.5s-chat", "abab6.5-chat"],
+    image: ["image-01", "kling-image"]
+  },
+  "openai.com": {
+    text: ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"],
+    image: ["dall-e-3", "dall-e-2"]
+  },
+  "anthropic.com": {
+    text: ["claude-3-5-sonnet-20241022", "claude-3-opus-20240229", "claude-3-haiku-20240307", "claude-3-5-haiku-20241022"],
+    image: []
+  },
+  "deepseek.com": {
+    text: ["deepseek-chat", "deepseek-reasoner"],
+    image: []
+  },
+  "siliconflow.cn": {
+    text: ["deepseek-ai/DeepSeek-V3", "deepseek-ai/DeepSeek-R1", "Qwen/Qwen2.5-72B-Instruct", "meta-llama/Meta-Llama-3.1-70B-Instruct", "THUDM/glm-4-9b-chat"],
+    image: ["stabilityai/stable-diffusion-3-5-large", "black-forest-labs/FLUX.1-schnell"]
+  },
+  "_default": {
+    text: ["gpt-4o", "gpt-4o-mini", "claude-3-5-sonnet-20241022", "deepseek-chat"],
+    image: ["dall-e-3", "flux-schnell"]
+  }
+};
+
+function getFallbackModels(apiUrl: string, type: "text" | "image"): string[] {
+  const lowerUrl = apiUrl.toLowerCase();
+  for (const [domain, models] of Object.entries(FALLBACK_MODELS)) {
+    if (domain !== "_default" && lowerUrl.includes(domain)) {
+      return models[type] ?? FALLBACK_MODELS._default[type];
+    }
+  }
+  return FALLBACK_MODELS._default[type];
+}
+
+router.get("/models", async (req, res) => {
+  const apiUrl = typeof req.query.apiUrl === "string" ? req.query.apiUrl.trim() : "";
+  const apiKey = typeof req.query.apiKey === "string" ? req.query.apiKey.trim() : "";
+  const type = typeof req.query.type === "string" ? req.query.type.trim() : "text";
+
+  if (!apiUrl) {
+    return res.status(400).json({ error: "缺少 apiUrl 参数。" });
+  }
+
+  const baseUrl = apiUrl
+    .replace(/\/$/, "")
+    .replace(/\/v1\/messages$/, "")
+    .replace(/\/v1\/chat\/completions$/, "");
+  const modelsUrl = `${baseUrl}/v1/models`;
+
+  let fetchedModels: string[] = [];
+
+  if (apiKey) {
+    try {
+      const response = await fetch(modelsUrl, {
+        headers: { Authorization: `Bearer ${apiKey}` }
+      });
+      if (response.ok) {
+        const data = (await response.json().catch(() => null)) as { data?: Array<{ id?: string }> } | null;
+        if (data && Array.isArray(data.data)) {
+          fetchedModels = data.data
+            .map((m) => m.id)
+            .filter((id): id is string => typeof id === "string" && id.length > 0);
+        }
+      }
+    } catch {
+      // Network or parsing errors — fall through to domain-based fallback
+    }
+  }
+
+  const models = fetchedModels.length > 0 ? fetchedModels : getFallbackModels(apiUrl, type as "text" | "image");
+  return res.json({ models, source: fetchedModels.length > 0 ? "api" : "fallback" });
+});
+
 router.post("/test", async (req, res) => {
   const apiUrl = typeof req.body.apiUrl === "string" ? req.body.apiUrl.trim() : "";
   const apiKey = typeof req.body.apiKey === "string" ? req.body.apiKey.trim() : "";
@@ -230,7 +306,13 @@ async function callMinimaxImageGeneration(input: {
   prompt: string;
   aspectRatio?: string;
 }): Promise<string | null> {
-  const url = input.apiUrl.replace(/\/$/, "").replace(/\/v1\/messages$/, "") + "/v1/image_generation";
+  let baseUrl = input.apiUrl.replace(/\/$/, "");
+  // If the URL already looks like a full API path (contains /v1/ or /v3/), use it as-is
+  if (!baseUrl.startsWith("http://") && !baseUrl.startsWith("https://")) {
+    return null;
+  }
+  const hasApiPrefix = /\/v\d+\//.test(baseUrl);
+  const url = hasApiPrefix ? baseUrl : `${baseUrl}/v1/image_generation`;
   const response = await fetch(url, {
     method: "POST",
     headers: {
@@ -248,12 +330,83 @@ async function callMinimaxImageGeneration(input: {
     return null;
   }
 
-  const payload = (await response.json().catch(() => null)) as
-    | { data?: { image?: string; image_url?: string } }
-    | null;
-
-  return payload?.data?.image ?? payload?.data?.image_url ?? null;
+  const payload = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+  if (!payload) {
+    return null;
+  }
+  return (
+    (payload.data as { image?: string; image_url?: string } | undefined)?.image ??
+    (payload.data as { image_url?: string } | undefined)?.image_url ??
+    (payload.images as string | undefined) ??
+    (payload.image as string | undefined) ??
+    (payload.image_url as string | undefined) ??
+    (Array.isArray(payload.image_urls) ? (payload.image_urls[0] as string) : undefined) ??
+    null
+  );
 }
+
+router.post("/test-image", async (req, res) => {
+  const apiUrl = typeof req.body.apiUrl === "string" ? req.body.apiUrl.trim() : "";
+  const apiKey = typeof req.body.apiKey === "string" ? req.body.apiKey.trim() : "";
+  const model = typeof req.body.model === "string" ? req.body.model.trim() : "image-01";
+
+  if (!apiUrl || !apiKey) {
+    return res.status(400).json({ error: "请先填写 API URL 和 API Key。" });
+  }
+
+  const testPrompt = "a simple test pattern";
+  let imageBase64: string | null = null;
+  let errorDetail = "";
+
+  try {
+    let baseUrl = apiUrl.replace(/\/$/, "");
+    const hasApiPrefix = /\/v\d+\//.test(baseUrl);
+    const url = hasApiPrefix ? baseUrl : `${baseUrl}/v1/image_generation`;
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: model,
+        prompt: testPrompt,
+        aspect_ratio: "1:1"
+      })
+    });
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      errorDetail = `HTTP ${response.status}: ${text.slice(0, 200)}`;
+    } else {
+      const payload = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+      if (!payload) {
+        errorDetail = "响应非 JSON";
+      } else {
+        imageBase64 =
+          (payload.data as { image?: string; image_url?: string } | undefined)?.image ??
+          (payload.data as { image_url?: string } | undefined)?.image_url ??
+          (payload.images as string | undefined) ??
+          (payload.image as string | undefined) ??
+          (payload.image_url as string | undefined) ??
+          (Array.isArray(payload.image_urls) ? (payload.image_urls[0] as string) : undefined) ??
+          null;
+        if (!imageBase64) {
+          errorDetail = `响应结构未知: ${JSON.stringify(payload).slice(0, 200)}`;
+        }
+      }
+    }
+  } catch (err) {
+    errorDetail = err instanceof Error ? err.message : "未知错误";
+  }
+
+  if (imageBase64) {
+    return res.json({ message: "CONNECTED" });
+  }
+
+  return res.status(502).json({ error: `图像 AI 连接测试失败：${errorDetail}` });
+});
 
 router.post("/generate-cover", async (req, res) => {
   const articleId = typeof req.body.articleId === "string" ? req.body.articleId.trim() : "";

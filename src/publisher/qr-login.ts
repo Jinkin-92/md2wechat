@@ -139,7 +139,11 @@ export async function startWechatQrLogin(account: PublishAccount): Promise<{
       await page.screenshot({ path: screenshotPath, fullPage: true });
     }
   } else {
-    await page.screenshot({ path: screenshotPath, fullPage: true });
+    // Fallback: capture with a fixed clip instead of fullPage to avoid 0-width issue
+    await page.screenshot({
+      path: screenshotPath,
+      clip: { x: 0, y: 0, width: 600, height: 600 }
+    });
   }
 
   const sessionId = `qr_${randomUUID()}`;
@@ -215,9 +219,12 @@ export async function checkWechatQrLogin(account: PublishAccount, sessionId: str
       await record.page.screenshot({ path: record.screenshotPath, fullPage: true });
     }
   } else {
-    await record.page.screenshot({ path: record.screenshotPath, fullPage: true });
+    // Fallback: capture with a fixed clip instead of fullPage to avoid 0-width issue
+    await record.page.screenshot({
+      path: record.screenshotPath,
+      clip: { x: 0, y: 0, width: 600, height: 600 }
+    });
   }
-  record.updatedAt = new Date().toISOString();
 
   const pageTitle = await record.page.title();
   const finalUrl = record.page.url();

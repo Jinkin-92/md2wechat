@@ -108,12 +108,21 @@ async function gotoHrefIfPresent(page: Page, selector: string): Promise<void> {
 
 async function findFirstSelector(page: Page, candidates: readonly string[]): Promise<string | null> {
   for (const candidate of candidates) {
-    const element = await page.$(candidate);
-    if (element) {
-      return candidate;
-    }
+    // Prefer a visible element (non-zero bounding rect), fallback to first found
+    const visible = await page.evaluate((sel) => {
+      const els = [...document.querySelectorAll(sel)];
+      return els.find((el) => {
+        const rect = el.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      }) ? sel : null;
+    }, candidate);
+    if (visible) return candidate;
   }
-
+  // Fallback: accept first element found even if not visibly rendered
+  for (const candidate of candidates) {
+    const element = await page.$(candidate);
+    if (element) return candidate;
+  }
   return null;
 }
 
@@ -336,6 +345,14 @@ export async function probeWechatDraftEntry(
       timeout: 30000
     });
 
+    // tsx/esbuild injects __name for keepNames, which breaks page.evaluate/page.$eval
+    // callbacks because the browser context doesn't have __name. Inject a polyfill.
+    await page.evaluate(() => {
+      if (typeof (window as any).__name === "undefined") {
+        (window as any).__name = (target: any, _value: string) => target;
+      }
+    });
+
     // Determine backend reachability before saving cookies.
     const pageTitle = await page.title();
     const finalUrl = page.url();
@@ -397,7 +414,19 @@ export async function probeWechatDraftEntry(
     }
 
     if (!editorReachable && matchedSelector?.startsWith("direct-nav:")) {
-      matchedTitleSelector = await findFirstSelector(page, WECHAT_SELECTORS.titleInputCandidates);
+      // Wait for title selector to be visible before confirming editor is reachable
+      const titleVisible = await page.waitForFunction(
+        (sel) => {
+          const el = document.querySelector(sel);
+          if (!el) return false;
+          const rect = el.getBoundingClientRect();
+          return rect.width > 0 && rect.height > 0;
+        },
+        { timeout: 15000 },
+        WECHAT_SELECTORS.titleInputCandidates[0]
+      ).then(() => true).catch(() => null);
+
+      matchedTitleSelector = titleVisible ? WECHAT_SELECTORS.titleInputCandidates[0] : await findFirstSelector(page, WECHAT_SELECTORS.titleInputCandidates);
       const editorUrlAfterNav = page.url();
       const bodyTextAfterNav = await page.evaluate(() => document.body.innerText ?? "");
       const isEditorUrl = /appmsg_edit/i.test(editorUrlAfterNav);

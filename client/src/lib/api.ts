@@ -456,6 +456,7 @@ export async function cancelWechatQrLogin(accountId: string, sessionId: string):
   }
 }
 
+
 export async function testAiConnection(input: {
   apiUrl: string;
   apiKey: string;
@@ -472,6 +473,27 @@ export async function testAiConnection(input: {
   const payload = await parseJsonResponse<{ message: string } | { error: string }>(response);
   if (!response.ok || "error" in payload) {
     throw new Error("error" in payload ? payload.error : "连接测试失败。");
+  }
+
+  return payload;
+}
+
+export async function testImageAiConnection(input: {
+  apiUrl: string;
+  apiKey: string;
+  model: string;
+}): Promise<{ message: string }> {
+  const response = await fetch(buildApiUrl("/api/ai/test-image"), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(input)
+  });
+
+  const payload = await parseJsonResponse<{ message: string } | { error: string }>(response);
+  if (!response.ok || "error" in payload) {
+    throw new Error("error" in payload ? payload.error : "图像 AI 连接测试失败。");
   }
 
   return payload;

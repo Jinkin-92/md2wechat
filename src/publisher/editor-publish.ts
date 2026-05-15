@@ -172,31 +172,98 @@ function sleep(ms: number): Promise<void> {
 
 async function findFirstSelector(page: Page, candidates: readonly string[]): Promise<string | null> {
   for (const candidate of candidates) {
-    const element = await page.$(candidate);
-    if (element) {
-      return candidate;
-    }
+    const visible = await page.evaluate((sel) => {
+      const els = [...document.querySelectorAll(sel)];
+      // Return the first element that has a non-zero bounding rect
+      return els.find((el) => {
+        const rect = el.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      }) ? sel : null;
+    }, candidate);
+    if (visible) return candidate;
   }
-
+  // Fallback to first found element even if not visibly rendered
+  for (const candidate of candidates) {
+    const element = await page.$(candidate);
+    if (element) return candidate;
+  }
   return null;
 }
 
 async function setInputValue(page: Page, selector: string, value: string): Promise<void> {
-  await page.waitForSelector(selector, { visible: true, timeout: 15000 });
-  await page.$eval(
-    selector,
-    (node, nextValue) => {
-      if (!(node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement)) {
-        throw new Error("Target selector is not an input element.");
+  // Wait for element to be visible (non-zero bounding rect)
+  await page.waitForFunction(
+    (sel) => {
+      const el = document.querySelector(sel);
+      if (!el) return false;
+      const rect = el.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    },
+    { timeout: 20000 },
+    selector
+  ).catch(() => null);
+
+  // Verify we're reading the right element - check rect and text
+  const allMatches = await page.evaluate((sel) => {
+    return [...document.querySelectorAll(sel)].map((el, i) => {
+      const rect = el.getBoundingClientRect();
+      const isInput = el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement;
+      return {
+        index: i,
+        tagName: (el as HTMLElement).tagName,
+        id: (el as HTMLElement).id,
+        rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+        value: isInput ? (el as HTMLInputElement).value.substring(0, 30) : (el as HTMLElement).innerText.substring(0, 30)
+      };
+    });
+  }, selector);
+  console.error("[setInputValue] ALL matching elements:", JSON.stringify(allMatches));
+  console.error("[setInputValue] input value length:", value.length, "first 50 chars:", value.substring(0, 50));
+
+  await sleep(300);
+
+  // Check if target is contenteditable (e.g. WeChat's ProseMirror title editor)
+  const isContentEditable = await page.evaluate((sel) => {
+    const el = document.querySelector(sel);
+    return el instanceof HTMLElement && el.getAttribute("contenteditable") === "true";
+  }, selector);
+
+  if (isContentEditable) {
+    // For ProseMirror / contenteditable editors, set innerText directly and dispatch events.
+    // This is more reliable than keyboard typing because the hidden form field
+    // is synchronised by the editor's internal state management.
+    await page.evaluate((sel, text) => {
+      const node = document.querySelector(sel);
+      if (!(node instanceof HTMLElement)) {
+        throw new Error("Target is not an HTMLElement.");
       }
       node.focus();
-      node.value = nextValue;
-      node.dispatchEvent(new Event("input", { bubbles: true }));
+      node.innerText = text;
+      node.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText" }));
       node.dispatchEvent(new Event("change", { bubbles: true }));
       node.blur();
-    },
-    value
-  );
+    }, selector, value);
+    return;
+  }
+
+  // Use keyboard typing to ensure React synthetic event system properly captures input
+  await page.focus(selector);
+  await sleep(100);
+
+  // Select all existing content first
+  await page.keyboard.down("Control");
+  await page.keyboard.press("a");
+  await page.keyboard.up("Control");
+  await sleep(100);
+
+  // Type character by character to trigger React input events properly
+  await page.keyboard.type(value, { delay: 5 });
+  await page.evaluate((sel) => {
+    const el = document.querySelector(sel);
+    if (el instanceof HTMLElement) {
+      el.blur();
+    }
+  }, selector);
 }
 
 async function fillBodyHtml(page: Page, selector: string, html: string): Promise<void> {
@@ -236,35 +303,56 @@ async function fillBodyHtml(page: Page, selector: string, html: string): Promise
 
 async function pasteBodyHtml(page: Page, selector: string, html: string, plainText: string): Promise<void> {
   await page.waitForSelector(selector, { visible: true, timeout: 15000 });
-  await page.$eval(
-    selector,
-    (node, payload) => {
-      if (!(node instanceof HTMLElement)) {
-        throw new Error("Editor node is not an HTMLElement.");
-      }
-      node.focus();
-      const selection = window.getSelection();
-      if (selection) {
-        const range = document.createRange();
-        range.selectNodeContents(node);
-        selection.removeAllRanges();
-        selection.addRange(range);
-      }
-      const clipboard = new DataTransfer();
-      clipboard.setData("text/html", payload.html);
-      clipboard.setData("text/plain", payload.plainText);
-      const pasteEvent = new ClipboardEvent("paste", {
-        clipboardData: clipboard,
-        bubbles: true,
-        cancelable: true
-      });
-      node.dispatchEvent(pasteEvent);
-      node.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertFromPaste" }));
-      node.dispatchEvent(new Event("change", { bubbles: true }));
-      node.blur();
-    },
-    { html, plainText }
+
+  // First, use execCommand insertHTML which bypasses React event system
+  // but properly writes to the ProseMirror DOM
+  const success = await page.evaluate((sel, htmlContent) => {
+    const node = document.querySelector(sel);
+    if (!(node instanceof HTMLElement)) {
+      return { ok: false, error: "not an HTMLElement" };
+    }
+    node.focus();
+
+    // Select all content
+    const selection = window.getSelection();
+    if (selection) {
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+
+    // Try insertHTML first (works for many editors)
+    let inserted = false;
+    try {
+      document.execCommand("selectAll", false);
+      inserted = document.execCommand("insertHTML", false, htmlContent);
+    } catch (e) {
+      // Fallback
+    }
+
+    if (!inserted) {
+      // Direct innerHTML set as fallback
+      node.innerHTML = htmlContent;
+    }
+
+    // Dispatch proper input events
+    node.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertFromPaste" }));
+    node.dispatchEvent(new Event("change", { bubbles: true }));
+    node.blur();
+    return { ok: true, innerHTMLLen: node.innerHTML.length };
+  }, selector, html);
+
+  console.error("[pasteBodyHtml] result:", JSON.stringify(success));
+  if (!success.ok) {
+    throw new Error("Failed to paste body HTML: " + success.error);
+  }
+
+  // Verify content was actually written
+  const afterLen = await page.$eval(selector, (node) =>
+    node instanceof HTMLElement ? node.innerHTML.length : 0
   );
+  console.error("[pasteBodyHtml] innerHTML length after paste:", afterLen);
 }
 
 async function resetBodyContent(page: Page, selector: string): Promise<void> {
@@ -704,10 +792,27 @@ export async function publishWechatDraft(input: {
 
     await page.goto(input.editorUrl, { waitUntil: "networkidle2", timeout: 30000 });
 
+    // tsx/esbuild injects __name for keepNames, which breaks page.evaluate/page.$eval
+    // callbacks because the browser context doesn't have __name. Inject a polyfill.
+    await page.evaluate(() => {
+      if (typeof (window as any).__name === "undefined") {
+        (window as any).__name = (target: any, _value: string) => target;
+      }
+    });
+
     const pageText = await page.evaluate(() => document.body.innerText ?? "");
     if (pageText.includes("请重新登录")) {
       throw new Error("进入编辑器后仍然被微信要求重新登录。");
     }
+
+    // Wait for React/SPA editor to fully mount before interacting
+    await page.waitForSelector("div[contenteditable='true'], textarea#title, input#title", {
+      visible: true,
+      timeout: 15000
+    }).catch(() => undefined);
+
+    // Give React SPA a moment to fully initialize the editor
+    await sleep(800);
 
     const titleSelector = await findFirstSelector(page, WECHAT_SELECTORS.titleInputCandidates);
     const bodySelector = await findFirstSelector(page, WECHAT_SELECTORS.bodyEditorCandidates);
@@ -715,11 +820,47 @@ export async function publishWechatDraft(input: {
       throw new Error("未能定位到标题输入框或正文编辑器。");
     }
 
+    // Wait for title input to be visible (non-zero bounding rect)
+    await page.waitForFunction(
+      (sel) => {
+        const el = document.querySelector(sel);
+        if (!el) return false;
+        const rect = el.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      },
+      { timeout: 20000 },
+      titleSelector
+    ).catch(() => null);
+    await sleep(300);
+
+    // Also verify body editor is visible
+    await page.waitForFunction(
+      (sel) => {
+        const el = document.querySelector(sel);
+        if (!el) return false;
+        const rect = el.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      },
+      { timeout: 15000 },
+      bodySelector
+    ).catch(() => null);
+    await sleep(300);
+
     const authorSelector = await findFirstSelector(page, WECHAT_SELECTORS.authorInputCandidates);
     const digestSelector = await findFirstSelector(page, WECHAT_SELECTORS.digestInputCandidates);
     const mediaPlan = buildArticleMediaPlan(input.article);
 
     await setInputValue(page, titleSelector, input.article.title);
+    // Check what actually got written
+    const titleAfterWrite = await page.$eval(titleSelector, (node) =>
+      node instanceof HTMLTextAreaElement
+        ? { valueLen: node.value.length, value: node.value.substring(0, 80) }
+        : node instanceof HTMLElement
+          ? { valueLen: node.innerText.length, value: node.innerText.substring(0, 80) }
+          : null
+    );
+    console.error("[write] title after setInputValue:", JSON.stringify(titleAfterWrite));
+
     if (authorSelector && input.article.metadata.author.trim()) {
       await setInputValue(page, authorSelector, input.article.metadata.author.trim());
     }
@@ -746,12 +887,32 @@ export async function publishWechatDraft(input: {
       (node) =>
         node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement
           ? node.value.trim()
-          : ""
+          : node instanceof HTMLElement
+            ? (node.innerText ?? "").trim()
+            : ""
     );
     const bodyLength = await page.$eval(bodySelector, (node) =>
       node instanceof HTMLElement ? (node.innerText ?? "").trim().length : 0
     );
     const richStructurePreserved = isRichTextStructurePreserved(bodyHtml);
+
+    // Comprehensive debug: inspect all relevant inputs
+    const debugInfo = await page.evaluate(() => {
+      const results: Record<string, unknown> = {};
+      const selectors = ["textarea#title", "input#title", "div.ProseMirror[contenteditable='true']", "textarea[name='title']", "input[name='title']"];
+      for (const sel of selectors) {
+        const els = document.querySelectorAll(sel);
+        results[sel] = Array.from(els).map((el: Element, i: number) => {
+          const isInput = el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement;
+          return isInput
+            ? { i, tag: (el as HTMLElement).tagName, id: (el as HTMLElement).id, valueLen: (el as HTMLInputElement).value.length }
+            : { i, tag: (el as HTMLElement).tagName, id: (el as HTMLElement).id, innerLen: (el as HTMLElement).innerHTML.length };
+        });
+      }
+      return results;
+    });
+    console.error("[DEBUG] validation failure state:", JSON.stringify({ titleValueLen: titleValue.length, bodyLength, richStructurePreserved, titleFirst50: titleValue.substring(0, 50) }));
+    console.error("[DEBUG] element inventory:", JSON.stringify(debugInfo));
 
     if (!titleValue || bodyLength < 20 || !richStructurePreserved) {
       await page.screenshot({ path: screenshotPath, fullPage: true });

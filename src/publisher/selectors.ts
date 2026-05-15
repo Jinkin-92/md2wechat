@@ -31,11 +31,14 @@ export const WECHAT_SELECTORS = {
     ".weui-desktop-menu a[href*='appmsg_edit']"
   ],
   titleInputCandidates: [
+    // WeChat MP now uses ProseMirror for the title editor; the hidden textarea is no longer the visible input.
+    ".title-editor__input .ProseMirror[contenteditable='true']",
+    "#js_title_main .ProseMirror[contenteditable='true']",
+    "input[placeholder*='标题']",
+    "textarea[placeholder*='标题']",
+    "#activity-name",
     "textarea#title",
-    "input#title",
-    "input[placeholder='请输入标题']",
-    "textarea[placeholder='请输入标题']",
-    "#activity-name"
+    "input#title"
   ],
   authorInputCandidates: [
     "input#author",
@@ -46,8 +49,11 @@ export const WECHAT_SELECTORS = {
     "textarea[name='digest']"
   ],
   bodyEditorCandidates: [
-    "div.ProseMirror[contenteditable='true']",
-    "#ueditor_0 .ProseMirror[contenteditable='true']"
+    // The body editor is inside the mock iframe #ueditor_0; the first bare ProseMirror
+    // match would hit the title editor, so we scope it explicitly.
+    "#ueditor_0 .ProseMirror[contenteditable='true']",
+    ".rich_media_content .ProseMirror[contenteditable='true']",
+    "div.ProseMirror[contenteditable='true']"
   ],
   coverFromContentCandidates: [
     ".js_selectCoverFromContent"
