@@ -358,7 +358,7 @@ export function injectTemplateTokens(
       ? `<section data-codex-meta="true" style="margin:0 0 28px;padding-bottom:18px;border-bottom:4px solid ${tokens.headingColor};font-family:${tokens.fontFamily};">
 <h1 style="margin:0 0 18px;font-size:30px;line-height:1.25;color:${tokens.headingColor};font-weight:500;font-family:${tokens.h1FontFamily};">${escapeHtml(title)}</h1>
 <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:14px;line-height:1.6;color:${tokens.mutedColor};">
-${originalChecked ? '<span style="display:inline-flex;align-items:center;padding:2px 8px;border-radius:4px;background:#f2f2f2;color:#8a8a8a;">Original</span>' : ""}
+${originalChecked ? '<span style="display:inline-flex;align-items:center;padding:2px 8px;border-radius:4px;background:#f2f2f2;color:#8a8a8a;">原创</span>' : ""}
 <span>${escapeHtml(author)}</span>
 ${platformName ? `<span style="color:#576174;">${escapeHtml(platformName)}</span>` : ""}
 </div>

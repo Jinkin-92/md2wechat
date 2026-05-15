@@ -651,12 +651,54 @@ async function insertBodyImagesAtPlaceholders(
   const missingPlaceholders: string[] = [];
 
   for (const slot of bodySlots) {
-    const imageIdentifier = await uploadImageIntoBody(page, editorSelector, slot.filePath);
-    const moved = await moveUploadedImageToAnchor(page, editorSelector, imageIdentifier, slot.markerToken);
-    if (!moved) {
+    // 1. Locate the marker text in the editor and select it
+    const markerFound = await page.evaluate(
+      function (selector, token) {
+        const editor = document.querySelector(selector);
+        if (!editor) {
+          return false;
+        }
+        const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
+        while (walker.nextNode()) {
+          const node = walker.currentNode;
+          const idx = node.textContent ? node.textContent.indexOf(token) : -1;
+          if (idx >= 0) {
+            const range = document.createRange();
+            range.setStart(node, idx);
+            range.setEnd(node, idx + token.length);
+            const sel = window.getSelection();
+            if (sel) {
+              sel.removeAllRanges();
+              sel.addRange(range);
+            }
+            if (editor instanceof HTMLElement) {
+              editor.focus();
+            }
+            return true;
+          }
+        }
+        return false;
+      },
+      editorSelector,
+      slot.markerToken
+    );
+
+    if (!markerFound) {
       missingPlaceholders.push(slot.label);
       continue;
     }
+
+    // 2. Delete the marker so the cursor sits at the intended insertion point
+    await page.keyboard.press("Delete");
+    await sleep(200);
+
+    // 3. Upload the image — WeChat inserts it at the current cursor position
+    const imageIdentifier = await uploadImageIntoBody(page, editorSelector, slot.filePath);
+    if (!imageIdentifier) {
+      missingPlaceholders.push(slot.label);
+      continue;
+    }
+
     insertedBodyImagePaths.push(slot.filePath);
   }
 

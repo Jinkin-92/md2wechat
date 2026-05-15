@@ -225,6 +225,13 @@ async function processMarkdownImages(
       }
     }
 
+    if (!absolutePath) {
+      // Skip images that cannot be resolved or downloaded.
+      // Keep the original markdown syntax so external URLs may still render
+      // and users get a meaningful clue for missing local files.
+      continue;
+    }
+
     bodyImages.push({
       id: slotId,
       placeholder,

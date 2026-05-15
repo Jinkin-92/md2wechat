@@ -781,7 +781,7 @@ export function WorkbenchPage() {
           <div className="workbench-digest-row">
             <textarea
               className="workbench-digest-textarea"
-              placeholder="摘要（最多120字，留空将自动提取正文首段）"
+              placeholder="摘要（最多120字，留空将自动提取正文前120字）"
               value={digestInput}
               maxLength={120}
               rows={2}
@@ -858,7 +858,9 @@ export function WorkbenchPage() {
             <div className="workbench-editor-meta">
               <div className="workbench-editor-title">{titleInput || "未命名文章"}</div>
               <div className="workbench-editor-author">
-                <span className="workbench-editor-badge">原创</span>
+                {article?.metadata.originalChecked && (
+                  <span className="workbench-editor-badge">原创</span>
+                )}
                 <span>{authorInput || "未填写作者"}</span>
               </div>
             </div>
@@ -962,7 +964,12 @@ export function WorkbenchPage() {
                       <div className="workbench-feed-card-body">
                         <h3>{titleInput || "未命名文章"}</h3>
                         <p>{digestPreview}</p>
-                        <span>{authorInput || "Jinkin遐想"} · 阅读 {Math.max(wordCount, 11)}</span>
+                        <span>
+                          {article?.metadata.originalChecked && (
+                            <span className="workbench-editor-badge" style={{ marginRight: 4, fontSize: 10, padding: '1px 4px' }}>原创</span>
+                          )}
+                          {authorInput || "Jinkin遐想"} · 阅读 {Math.max(wordCount, 11)}
+                        </span>
                       </div>
                     </article>
                   </div>
