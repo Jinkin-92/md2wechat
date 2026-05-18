@@ -426,7 +426,9 @@ async function moveUploadedImageToAnchor(
       }
 
       const image = [...node.querySelectorAll("img.js_insertlocalimg")].find((candidate) => {
-        return candidate.getAttribute("data-codex-temp-id") === payload.imageIdentifier;
+        const fileId = candidate.getAttribute("data-imgfileid");
+        const src = candidate.getAttribute("src");
+        return fileId === payload.imageIdentifier || src === payload.imageIdentifier;
       });
       if (!(image instanceof HTMLElement)) {
         return false;
@@ -513,39 +515,19 @@ async function uploadImageIntoBody(page: Page, editorSelector: string, filePath:
     }
   }, editorSelector);
 
-  // Use a synthetic temp id so we don't rely on data-imgfileid/src which
-  // may be empty when WeChat hasn't finished populating attributes.
-  const tempId = `codex-img-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-
   const beforeCount = await page.$eval(editorSelector, (node) =>
     node instanceof HTMLElement ? node.querySelectorAll("img.js_insertlocalimg").length : 0
   );
-
   await uploadInput.uploadFile(filePath);
   await waitForBodyImageCount(page, editorSelector, beforeCount + 1);
-
-  // Mark the newly inserted image with our temp id.
-  await page.evaluate(
-    function (selector, count, id) {
-      const editor = document.querySelector(selector);
-      if (!(editor instanceof HTMLElement)) return;
-      const images = [...editor.querySelectorAll("img.js_insertlocalimg")];
-      if (images.length <= count) return;
-      // Walk backwards — the newest image is usually the one that hasn't
-      // been processed yet. On the first upload (count==0) it's the only one.
-      for (let i = images.length - 1; i >= 0; i--) {
-        if (!images[i].hasAttribute("data-codex-temp-id")) {
-          images[i].setAttribute("data-codex-temp-id", id);
-          break;
-        }
-      }
-    },
-    editorSelector,
-    beforeCount,
-    tempId
-  );
-
-  return tempId;
+  return page.$eval(editorSelector, (node) => {
+    if (!(node instanceof HTMLElement)) {
+      return null;
+    }
+    const images = [...node.querySelectorAll("img.js_insertlocalimg")];
+    const latest = images.at(-1);
+    return latest?.getAttribute("data-imgfileid") ?? latest?.getAttribute("src") ?? null;
+  });
 }
 
 async function removeBodyImage(page: Page, editorSelector: string, identifier: string | null): Promise<void> {
@@ -559,7 +541,9 @@ async function removeBodyImage(page: Page, editorSelector: string, identifier: s
         return false;
       }
       const image = [...node.querySelectorAll("img.js_insertlocalimg")].find((candidate) => {
-        return candidate.getAttribute("data-codex-temp-id") === targetIdentifier;
+        const fileId = candidate.getAttribute("data-imgfileid");
+        const src = candidate.getAttribute("src");
+        return fileId === targetIdentifier || src === targetIdentifier;
       });
       if (!(image instanceof HTMLElement)) {
         return false;
