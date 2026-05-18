@@ -551,9 +551,9 @@ async function removeBodyImage(page: Page, editorSelector: string, identifier: s
   if (!identifier) {
     return;
   }
-  const imageMarked = await page.$eval(
+  const removed = await page.$eval(
     editorSelector,
-    (node, targetIdentifier) => {
+    function (node, targetIdentifier) {
       if (!(node instanceof HTMLElement)) {
         return false;
       }
@@ -565,24 +565,22 @@ async function removeBodyImage(page: Page, editorSelector: string, identifier: s
       if (!(image instanceof HTMLElement)) {
         return false;
       }
-      image.id = "codex-temp-remove-image";
+      // Remove the image block directly — more reliable than click+Backspace
+      // in ProseMirror because we avoid relying on selection behavior.
+      const imageBlock = image.closest("figure, section, p, div") ?? image;
+      if (imageBlock instanceof HTMLElement) {
+        imageBlock.remove();
+      }
+      node.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContent" }));
+      node.dispatchEvent(new Event("change", { bubbles: true }));
       return true;
     },
     identifier
   );
-  if (!imageMarked) {
+  if (!removed) {
     return;
   }
-  await page.evaluate(() => {
-    const image = document.querySelector("#codex-temp-remove-image");
-    if (image instanceof HTMLElement) {
-      image.click();
-    }
-  });
-  await page.keyboard.press("Backspace");
-  await page.waitForFunction(() => !document.querySelector("#codex-temp-remove-image"), {
-    timeout: 10000
-  });
+  await sleep(300);
 }
 
 async function applyCoverImage(page: Page, editorSelector: string, filePath: string): Promise<boolean> {
