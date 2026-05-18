@@ -426,9 +426,7 @@ async function moveUploadedImageToAnchor(
       }
 
       const image = [...node.querySelectorAll("img.js_insertlocalimg")].find((candidate) => {
-        const fileId = candidate.getAttribute("data-imgfileid");
-        const src = candidate.getAttribute("src");
-        return fileId === payload.imageIdentifier || src === payload.imageIdentifier;
+        return candidate.getAttribute("data-codex-temp-id") === payload.imageIdentifier;
       });
       if (!(image instanceof HTMLElement)) {
         return false;
@@ -515,36 +513,39 @@ async function uploadImageIntoBody(page: Page, editorSelector: string, filePath:
     }
   }, editorSelector);
 
-  // Record identifiers before upload so we can reliably identify the NEW image
-  const beforeIds = await page.$eval(editorSelector, (node) => {
-    if (!(node instanceof HTMLElement)) return [];
-    return [...node.querySelectorAll("img.js_insertlocalimg")].map((img) =>
-      img.getAttribute("data-imgfileid") ?? img.getAttribute("src") ?? ""
-    ).filter(Boolean);
-  });
+  // Use a synthetic temp id so we don't rely on data-imgfileid/src which
+  // may be empty when WeChat hasn't finished populating attributes.
+  const tempId = `codex-img-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+  const beforeCount = await page.$eval(editorSelector, (node) =>
+    node instanceof HTMLElement ? node.querySelectorAll("img.js_insertlocalimg").length : 0
+  );
 
   await uploadInput.uploadFile(filePath);
-  await waitForBodyImageCount(page, editorSelector, beforeIds.length + 1);
+  await waitForBodyImageCount(page, editorSelector, beforeCount + 1);
 
-  return page.$eval(
-    editorSelector,
-    (node, beforeList) => {
-      if (!(node instanceof HTMLElement)) return null;
-      const images = [...node.querySelectorAll("img.js_insertlocalimg")];
-      // Find the first image whose identifier did NOT exist before upload.
-      // This is robust even when the new image lands at the top of the doc.
-      for (const img of images) {
-        const id = img.getAttribute("data-imgfileid") ?? img.getAttribute("src") ?? null;
-        if (id && !beforeList.includes(id)) {
-          return id;
+  // Mark the newly inserted image with our temp id.
+  await page.evaluate(
+    function (selector, count, id) {
+      const editor = document.querySelector(selector);
+      if (!(editor instanceof HTMLElement)) return;
+      const images = [...editor.querySelectorAll("img.js_insertlocalimg")];
+      if (images.length <= count) return;
+      // Walk backwards — the newest image is usually the one that hasn't
+      // been processed yet. On the first upload (count==0) it's the only one.
+      for (let i = images.length - 1; i >= 0; i--) {
+        if (!images[i].hasAttribute("data-codex-temp-id")) {
+          images[i].setAttribute("data-codex-temp-id", id);
+          break;
         }
       }
-      // Fallback: return the last image
-      const latest = images.at(-1);
-      return latest?.getAttribute("data-imgfileid") ?? latest?.getAttribute("src") ?? null;
     },
-    beforeIds
+    editorSelector,
+    beforeCount,
+    tempId
   );
+
+  return tempId;
 }
 
 async function removeBodyImage(page: Page, editorSelector: string, identifier: string | null): Promise<void> {
@@ -558,9 +559,7 @@ async function removeBodyImage(page: Page, editorSelector: string, identifier: s
         return false;
       }
       const image = [...node.querySelectorAll("img.js_insertlocalimg")].find((candidate) => {
-        const fileId = candidate.getAttribute("data-imgfileid");
-        const src = candidate.getAttribute("src");
-        return fileId === targetIdentifier || src === targetIdentifier;
+        return candidate.getAttribute("data-codex-temp-id") === targetIdentifier;
       });
       if (!(image instanceof HTMLElement)) {
         return false;
