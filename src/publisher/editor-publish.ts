@@ -515,19 +515,36 @@ async function uploadImageIntoBody(page: Page, editorSelector: string, filePath:
     }
   }, editorSelector);
 
-  const beforeCount = await page.$eval(editorSelector, (node) =>
-    node instanceof HTMLElement ? node.querySelectorAll("img.js_insertlocalimg").length : 0
-  );
-  await uploadInput.uploadFile(filePath);
-  await waitForBodyImageCount(page, editorSelector, beforeCount + 1);
-  return page.$eval(editorSelector, (node) => {
-    if (!(node instanceof HTMLElement)) {
-      return null;
-    }
-    const images = [...node.querySelectorAll("img.js_insertlocalimg")];
-    const latest = images.at(-1);
-    return latest?.getAttribute("data-imgfileid") ?? latest?.getAttribute("src") ?? null;
+  // Record identifiers before upload so we can reliably identify the NEW image
+  const beforeIds = await page.$eval(editorSelector, (node) => {
+    if (!(node instanceof HTMLElement)) return [];
+    return [...node.querySelectorAll("img.js_insertlocalimg")].map((img) =>
+      img.getAttribute("data-imgfileid") ?? img.getAttribute("src") ?? ""
+    ).filter(Boolean);
   });
+
+  await uploadInput.uploadFile(filePath);
+  await waitForBodyImageCount(page, editorSelector, beforeIds.length + 1);
+
+  return page.$eval(
+    editorSelector,
+    (node, beforeList) => {
+      if (!(node instanceof HTMLElement)) return null;
+      const images = [...node.querySelectorAll("img.js_insertlocalimg")];
+      // Find the first image whose identifier did NOT exist before upload.
+      // This is robust even when the new image lands at the top of the doc.
+      for (const img of images) {
+        const id = img.getAttribute("data-imgfileid") ?? img.getAttribute("src") ?? null;
+        if (id && !beforeList.includes(id)) {
+          return id;
+        }
+      }
+      // Fallback: return the last image
+      const latest = images.at(-1);
+      return latest?.getAttribute("data-imgfileid") ?? latest?.getAttribute("src") ?? null;
+    },
+    beforeIds
+  );
 }
 
 async function removeBodyImage(page: Page, editorSelector: string, identifier: string | null): Promise<void> {
