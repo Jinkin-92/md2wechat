@@ -189,7 +189,7 @@ async function processMarkdownImages(
   for (let i = 0; i < images.length; i++) {
     const { alt, url } = images[i];
     const slotId = `slot_${i + 1}`;
-    const placeholderText = alt ? `${alt} ${i + 1}` : `图片 ${i + 1}`;
+    const placeholderText = alt ? `此处插入${alt} ${i + 1}` : `此处插入图片 ${i + 1}`;
     const placeholder = `【${placeholderText}】`;
     const label = alt ? `${alt} ${i + 1}` : `正文图片 ${i + 1}`;
     const markerToken = `[[MD2WECHAT_IMAGE_${slotId.toUpperCase()}]]`;
