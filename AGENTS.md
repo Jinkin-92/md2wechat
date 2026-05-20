@@ -225,3 +225,4 @@ npx playwright test       # E2E 测试（需要 dev server 在 5373 运行）
 - **素材图片 404**：确认 `DATA_DIR` 指向正确，且后端 `express.static` 已挂载 `/data`。
 - **E2E 测试找不到 Chromium**：`playwright.config.ts` 中硬编码了 Windows 本地 Chromium 路径，若环境变化需更新该路径。
 - **发布任务失败**：查看 `data/screenshots/` 中的 Puppeteer 截图，以及 `data/publish/tasks.json` 中的步骤详情，定位具体失败环节。
+- **修改代码后功能没有变化（最常见陷阱）**：`tsx watch` 和 `vite` 在 Windows 上经常静默失效，进程还在跑但根本不加载新代码。**修改后务必验证**：检查 `backend-dev.out.log` / `client-dev.out.log` 的最后修改时间是否晚于源文件修改时间；或直接查看进程启动时间（`Get-Process -Id <PID> | Select-Object StartTime`）。一旦怀疑热重载失效，**立即 kill 进程并手动重启前后端**，不要反复修改代码试图"修复"。已为此浪费过大量时间，必须强制执行这条验证规则。

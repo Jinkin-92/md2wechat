@@ -266,11 +266,41 @@ router.post("/typeset", async (req, res) => {
     const parsed = extractJsonBlock(responseText);
     const nextMarkdown = parsed.markdown?.trim() || article.rawMarkdown;
     const nextDigest = parsed.digest?.trim() || article.metadata.digest;
+
+    // Rebuild mediaAssets so placeholder slots match the new markdown.
+    // This prevents stale slots from causing orphaned uploads during publish.
+    const placeholderPattern = /\u3010\u6b64\u5904\u63d2\u5165[^\u3011]+\u3011/g;
+    const newPlaceholders = [...nextMarkdown.matchAll(placeholderPattern)].map((m) => m[0]);
+    const existingBodyImages = article.mediaAssets?.bodyImages ?? [];
+    const updatedBodyImages = newPlaceholders.map((placeholder, index) => {
+      const existing = existingBodyImages.find((bi) => bi.placeholder === placeholder);
+      if (existing) {
+        return {
+          ...existing,
+          id: `slot_${index + 1}`,
+          label: existing.label || `正文图片 ${index + 1}`,
+          markerToken: `[[MD2WECHAT_IMAGE_SLOT_${index + 1}]]`
+        };
+      }
+      return {
+        id: `slot_${index + 1}`,
+        placeholder,
+        label: `正文图片 ${index + 1}`,
+        markerToken: `[[MD2WECHAT_IMAGE_SLOT_${index + 1}]]`,
+        localPath: null,
+        storageKey: null
+      };
+    });
+    const updatedMediaAssets = {
+      ...article.mediaAssets,
+      bodyImages: updatedBodyImages
+    };
+
     const baseHtml = await parseMarkdown(nextMarkdown);
     const renderedHtml = injectTemplateTokens(
       baseHtml,
       article.templateId ?? "claude",
-      article.mediaAssets,
+      updatedMediaAssets,
       undefined,
       {
         title: article.title,
@@ -283,6 +313,7 @@ router.post("/typeset", async (req, res) => {
       ...article,
       rawMarkdown: nextMarkdown,
       renderedHtml,
+      mediaAssets: updatedMediaAssets,
       status: "rendered",
       metadata: {
         ...article.metadata,

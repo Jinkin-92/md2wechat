@@ -17,6 +17,7 @@ type BodyImageSlot = {
   id: string;
   label: string;
   markerToken: string;
+  placeholder: string;
   filePath: string;
 };
 
@@ -81,11 +82,21 @@ function buildEditorHtml(article: ArticleRecord): string {
     }, cleanedHtml);
   }
 
+  // Fallback: raw markdown — but still preserve image placeholder positions
+  // by wrapping each placeholder in a marked paragraph so the publisher can
+  // locate them even without a pre-rendered HTML figure.
+  const slots = article.mediaAssets?.bodyImages ?? [];
   return article.rawMarkdown
     .split(/\r?\n\r?\n/)
     .map((segment) => segment.trim())
     .filter(Boolean)
-    .map((segment) => `<p>${segment.replace(/\n/g, "<br>")}</p>`)
+    .map((segment) => {
+      const matchingSlot = slots.find((slot) => slot.placeholder === segment);
+      if (matchingSlot) {
+        return `<p data-codex-slot-marker="${matchingSlot.id}">${matchingSlot.placeholder}</p>`;
+      }
+      return `<p>${segment.replace(/\n/g, "<br>")}</p>`;
+    })
     .join("");
 }
 
@@ -147,6 +158,7 @@ function buildArticleMediaPlan(article: ArticleRecord): ArticleMediaPlan {
       id: slot.id,
       label: slot.label,
       markerToken: slot.markerToken,
+      placeholder: slot.placeholder,
       filePath,
     });
   });
@@ -172,10 +184,10 @@ function sleep(ms: number): Promise<void> {
 
 async function findFirstSelector(page: Page, candidates: readonly string[]): Promise<string | null> {
   for (const candidate of candidates) {
-    const visible = await page.evaluate((sel) => {
+    const visible = await page.evaluate(function (sel) {
       const els = [...document.querySelectorAll(sel)];
       // Return the first element that has a non-zero bounding rect
-      return els.find((el) => {
+      return els.find(function (el) {
         const rect = el.getBoundingClientRect();
         return rect.width > 0 && rect.height > 0;
       }) ? sel : null;
@@ -193,7 +205,7 @@ async function findFirstSelector(page: Page, candidates: readonly string[]): Pro
 async function setInputValue(page: Page, selector: string, value: string): Promise<void> {
   // Wait for element to be visible (non-zero bounding rect)
   await page.waitForFunction(
-    (sel) => {
+    function (sel) {
       const el = document.querySelector(sel);
       if (!el) return false;
       const rect = el.getBoundingClientRect();
@@ -201,11 +213,11 @@ async function setInputValue(page: Page, selector: string, value: string): Promi
     },
     { timeout: 20000 },
     selector
-  ).catch(() => null);
+  ).catch(function () { return null; });
 
   // Verify we're reading the right element - check rect and text
-  const allMatches = await page.evaluate((sel) => {
-    return [...document.querySelectorAll(sel)].map((el, i) => {
+  const allMatches = await page.evaluate(function (sel) {
+    return [...document.querySelectorAll(sel)].map(function (el, i) {
       const rect = el.getBoundingClientRect();
       const isInput = el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement;
       return {
@@ -223,7 +235,7 @@ async function setInputValue(page: Page, selector: string, value: string): Promi
   await sleep(300);
 
   // Check if target is contenteditable (e.g. WeChat's ProseMirror title editor)
-  const isContentEditable = await page.evaluate((sel) => {
+  const isContentEditable = await page.evaluate(function (sel) {
     const el = document.querySelector(sel);
     return el instanceof HTMLElement && el.getAttribute("contenteditable") === "true";
   }, selector);
@@ -232,7 +244,7 @@ async function setInputValue(page: Page, selector: string, value: string): Promi
     // For ProseMirror / contenteditable editors, set innerText directly and dispatch events.
     // This is more reliable than keyboard typing because the hidden form field
     // is synchronised by the editor's internal state management.
-    await page.evaluate((sel, text) => {
+    await page.evaluate(function (sel, text) {
       const node = document.querySelector(sel);
       if (!(node instanceof HTMLElement)) {
         throw new Error("Target is not an HTMLElement.");
@@ -258,7 +270,7 @@ async function setInputValue(page: Page, selector: string, value: string): Promi
 
   // Type character by character to trigger React input events properly
   await page.keyboard.type(value, { delay: 5 });
-  await page.evaluate((sel) => {
+  await page.evaluate(function (sel) {
     const el = document.querySelector(sel);
     if (el instanceof HTMLElement) {
       el.blur();
@@ -270,7 +282,7 @@ async function fillBodyHtml(page: Page, selector: string, html: string): Promise
   await page.waitForSelector(selector, { visible: true, timeout: 15000 });
   await page.$eval(
     selector,
-    (node, nextHtml) => {
+    function (node, nextHtml) {
       if (!(node instanceof HTMLElement)) {
         throw new Error("Editor node is not an HTMLElement.");
       }
@@ -306,7 +318,7 @@ async function pasteBodyHtml(page: Page, selector: string, html: string, plainTe
 
   // First, use execCommand insertHTML which bypasses React event system
   // but properly writes to the ProseMirror DOM
-  const success = await page.evaluate((sel, htmlContent) => {
+  const success = await page.evaluate(function (sel, htmlContent) {
     const node = document.querySelector(sel);
     if (!(node instanceof HTMLElement)) {
       return { ok: false, error: "not an HTMLElement" };
@@ -349,15 +361,15 @@ async function pasteBodyHtml(page: Page, selector: string, html: string, plainTe
   }
 
   // Verify content was actually written
-  const afterLen = await page.$eval(selector, (node) =>
-    node instanceof HTMLElement ? node.innerHTML.length : 0
-  );
+  const afterLen = await page.$eval(selector, function (node) {
+    return node instanceof HTMLElement ? node.innerHTML.length : 0;
+  });
   console.error("[pasteBodyHtml] innerHTML length after paste:", afterLen);
 }
 
 async function resetBodyContent(page: Page, selector: string): Promise<void> {
   await page.waitForSelector(selector, { visible: true, timeout: 15000 });
-  await page.$eval(selector, (node) => {
+  await page.$eval(selector, function (node) {
     if (!(node instanceof HTMLElement)) {
       throw new Error("Editor node is not an HTMLElement.");
     }
@@ -368,7 +380,7 @@ async function resetBodyContent(page: Page, selector: string): Promise<void> {
 }
 
 async function moveCaretToEditorEnd(page: Page, selector: string): Promise<void> {
-  await page.$eval(selector, (node) => {
+  await page.$eval(selector, function (node) {
     if (!(node instanceof HTMLElement)) {
       throw new Error("Editor node is not an HTMLElement.");
     }
@@ -393,13 +405,13 @@ async function moveUploadedImageToAnchor(
 ): Promise<boolean> {
   return page.$eval(
     editorSelector,
-    (node, payload) => {
+    function (node, payload) {
       if (!(node instanceof HTMLElement)) {
         throw new Error("Editor node is not an HTMLElement.");
       }
 
-      const normalizeText = (value: string) => value.replace(/[\s\u00a0]+/g, "");
-      const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const normalizeText = function (value: string) { return value.replace(/[\s\u00a0]+/g, ""); };
+      const escapeRegExp = function (value: string) { return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); };
       const placeholderPattern = new RegExp(
         escapeRegExp(payload.markerToken).replace(/\\ /g, "[\\s\\u00a0]*")
       );
@@ -425,7 +437,7 @@ async function moveUploadedImageToAnchor(
         return false;
       }
 
-      const image = [...node.querySelectorAll("img.js_insertlocalimg")].find((candidate) => {
+      const image = [...node.querySelectorAll("img.js_insertlocalimg")].find(function (candidate) {
         const fileId = candidate.getAttribute("data-imgfileid");
         const src = candidate.getAttribute("src");
         return fileId === payload.imageIdentifier || src === payload.imageIdentifier;
@@ -466,7 +478,7 @@ async function moveUploadedImageToAnchor(
 
 async function waitForBodyImageCount(page: Page, editorSelector: string, expectedCount: number): Promise<void> {
   await page.waitForFunction(
-    (selector: string, count: number) => {
+    function (selector: string, count: number) {
       const editor = document.querySelector(selector);
       if (!(editor instanceof HTMLElement)) {
         return false;
@@ -485,7 +497,9 @@ async function uploadImageIntoBody(page: Page, editorSelector: string, filePath:
     (await page.$("input[type='file'][name='file']"));
   if (!uploadInput) {
     await page.waitForFunction(
-      () => Boolean(document.querySelector("#js_editor_insertimage input[type='file'], input[type='file'][name='file']")),
+      function () {
+        return Boolean(document.querySelector("#js_editor_insertimage input[type='file'], input[type='file'][name='file']"));
+      },
       { timeout: 20000 }
     );
     uploadInput =
@@ -515,12 +529,12 @@ async function uploadImageIntoBody(page: Page, editorSelector: string, filePath:
     }
   }, editorSelector);
 
-  const beforeCount = await page.$eval(editorSelector, (node) =>
-    node instanceof HTMLElement ? node.querySelectorAll("img.js_insertlocalimg").length : 0
-  );
+  const beforeCount = await page.$eval(editorSelector, function (node) {
+    return node instanceof HTMLElement ? node.querySelectorAll("img.js_insertlocalimg").length : 0;
+  });
   await uploadInput.uploadFile(filePath);
   await waitForBodyImageCount(page, editorSelector, beforeCount + 1);
-  return page.$eval(editorSelector, (node) => {
+  return page.$eval(editorSelector, function (node) {
     if (!(node instanceof HTMLElement)) {
       return null;
     }
@@ -540,7 +554,7 @@ async function removeBodyImage(page: Page, editorSelector: string, identifier: s
       if (!(node instanceof HTMLElement)) {
         return false;
       }
-      const image = [...node.querySelectorAll("img.js_insertlocalimg")].find((candidate) => {
+      const image = [...node.querySelectorAll("img.js_insertlocalimg")].find(function (candidate) {
         const fileId = candidate.getAttribute("data-imgfileid");
         const src = candidate.getAttribute("src");
         return fileId === targetIdentifier || src === targetIdentifier;
@@ -571,10 +585,10 @@ async function applyCoverImage(page: Page, editorSelector: string, filePath: str
   const temporaryImageIdentifier = await uploadImageIntoBody(page, editorSelector, filePath);
   await sleep(5000);
 
-  const openSucceeded = await page.evaluate((selectors: readonly string[]) => {
+  const openSucceeded = await page.evaluate(function (selectors: readonly string[]) {
     const trigger = selectors
-      .map((selector) => document.querySelector(selector))
-      .find((candidate): candidate is HTMLElement => candidate instanceof HTMLElement);
+      .map(function (selector) { return document.querySelector(selector); })
+      .find(function (candidate): candidate is HTMLElement { return candidate instanceof HTMLElement; });
     if (!trigger) {
       return false;
     }
@@ -590,7 +604,7 @@ async function applyCoverImage(page: Page, editorSelector: string, filePath: str
     visible: true,
     timeout: 15000
   });
-  await page.evaluate((selector: string) => {
+  await page.evaluate(function (selector: string) {
     const item = document.querySelector(selector);
     if (item instanceof HTMLElement) {
       item.click();
@@ -598,7 +612,7 @@ async function applyCoverImage(page: Page, editorSelector: string, filePath: str
   }, WECHAT_SELECTORS.coverChooserItemCandidates[0]);
 
   await page.waitForFunction(
-    () => {
+    function () {
       const dialog = document.querySelector(".img_crop_panel")?.closest(".weui-desktop-dialog");
       const nextButton = dialog?.querySelector(".weui-desktop-btn_primary");
       return nextButton instanceof HTMLElement && !nextButton.className.includes("disabled");
@@ -606,7 +620,7 @@ async function applyCoverImage(page: Page, editorSelector: string, filePath: str
     { timeout: 15000 }
   );
 
-  await page.evaluate(() => {
+  await page.evaluate(function () {
     const nextButton = document
       .querySelector(".img_crop_panel")
       ?.closest(".weui-desktop-dialog")
@@ -615,7 +629,7 @@ async function applyCoverImage(page: Page, editorSelector: string, filePath: str
       nextButton.id = "codex-temp-cover-next";
     }
   });
-  await page.evaluate(() => {
+  await page.evaluate(function () {
     const nextButton = document.querySelector("#codex-temp-cover-next");
     if (nextButton instanceof HTMLElement) {
       nextButton.click();
@@ -628,7 +642,7 @@ async function applyCoverImage(page: Page, editorSelector: string, filePath: str
     timeout: 15000
   });
 
-  await page.evaluate(() => {
+  await page.evaluate(function () {
     const confirmButton = document
       .querySelector(".cover-edit-new")
       ?.closest(".weui-desktop-dialog")
@@ -637,7 +651,7 @@ async function applyCoverImage(page: Page, editorSelector: string, filePath: str
       confirmButton.id = "codex-temp-cover-confirm";
     }
   });
-  await page.evaluate(() => {
+  await page.evaluate(function () {
     const confirmButton = document.querySelector("#codex-temp-cover-confirm");
     if (confirmButton instanceof HTMLElement) {
       confirmButton.click();
@@ -646,9 +660,9 @@ async function applyCoverImage(page: Page, editorSelector: string, filePath: str
   await sleep(1500);
 
   await page.waitForFunction(
-    (selectors: readonly string[]) =>
-      selectors.some((selector) => {
-        return [...document.querySelectorAll(selector)].some((preview) => {
+    function (selectors: readonly string[]) {
+      return selectors.some(function (selector) {
+        return [...document.querySelectorAll(selector)].some(function (preview) {
           if (!(preview instanceof HTMLElement)) {
             return false;
           }
@@ -660,7 +674,8 @@ async function applyCoverImage(page: Page, editorSelector: string, filePath: str
             style.backgroundImage !== 'url("")'
           );
         });
-      }),
+      });
+    },
     { timeout: 20000 },
     WECHAT_SELECTORS.coverPreviewCandidates
   );
@@ -686,9 +701,22 @@ async function insertBodyImagesAtPlaceholders(
 
   for (const slot of reversedSlots) {
     const imageIdentifier = await uploadImageIntoBody(page, editorSelector, slot.filePath);
-    const moved = await moveUploadedImageToAnchor(page, editorSelector, imageIdentifier, slot.markerToken);
+
+    // Primary: locate by invisible marker token (fast & precise).
+    let moved = await moveUploadedImageToAnchor(page, editorSelector, imageIdentifier, slot.markerToken);
+
+    // Fallback: if the marker was stripped by ProseMirror or never generated,
+    // try to locate by the visible placeholder text itself (e.g. "【此处插入图片 1】").
+    if (!moved && slot.placeholder) {
+      moved = await moveUploadedImageToAnchor(page, editorSelector, imageIdentifier, slot.placeholder);
+    }
+
     if (!moved) {
       missingPlaceholders.push(slot.label);
+      // Delete the orphaned image so it does not clutter the article
+      if (imageIdentifier) {
+        await removeBodyImage(page, editorSelector, imageIdentifier);
+      }
       continue;
     }
     insertedBodyImagePaths.push(slot.filePath);
@@ -704,20 +732,21 @@ async function insertBodyImagesAtPlaceholders(
 
 async function waitForSaveSuccess(page: Page): Promise<string | null> {
   await page.waitForFunction(
-    (selectors: readonly string[]) =>
-      selectors.some((selector) => {
+    function (selectors: readonly string[]) {
+      return selectors.some(function (selector) {
         const node = document.querySelector(selector);
         if (!(node instanceof HTMLElement)) {
           return false;
         }
         const style = window.getComputedStyle(node);
         return style.display !== "none" && style.visibility !== "hidden" && node.innerText.trim().length > 0;
-      }),
+      });
+    },
     { timeout: 20000 },
     WECHAT_SELECTORS.saveSuccessCandidates
   );
 
-  return page.evaluate((selectors: readonly string[]) => {
+  return page.evaluate(function (selectors: readonly string[]) {
     for (const selector of selectors) {
       const node = document.querySelector(selector);
       if (!(node instanceof HTMLElement)) {
@@ -738,7 +767,7 @@ async function waitForSaveSuccess(page: Page): Promise<string | null> {
 
 async function waitForSavedEditorUrl(page: Page): Promise<void> {
   await page
-    .waitForFunction(() => {
+    .waitForFunction(function () {
       const href = location.href;
       return href.includes("appmsgid=") && href.includes("media/appmsg_edit");
     }, { timeout: 15000 })
@@ -783,9 +812,9 @@ async function reopenDraftVerification(input: {
       visible: true,
       timeout: 30000
     });
-    const bodyHtml = await page.$eval(WECHAT_SELECTORS.bodyEditorCandidates[0], (node: Element) =>
-      node instanceof HTMLElement ? node.innerHTML : ""
-    );
+    const bodyHtml = await page.$eval(WECHAT_SELECTORS.bodyEditorCandidates[0], function (node: Element) {
+      return node instanceof HTMLElement ? node.innerHTML : "";
+    });
     const reopenRichTextPreserved = isRichTextStructurePreserved(bodyHtml);
     await page.screenshot({ path: reopenScreenshotPath, fullPage: true });
     return {
@@ -830,13 +859,13 @@ export async function publishWechatDraft(input: {
 
     // tsx/esbuild injects __name for keepNames, which breaks page.evaluate/page.$eval
     // callbacks because the browser context doesn't have __name. Inject a polyfill.
-    await page.evaluate(() => {
+    await page.evaluate(function () {
       if (typeof (window as any).__name === "undefined") {
-        (window as any).__name = (target: any, _value: string) => target;
+        (window as any).__name = function (target: any, _value: string) { return target; };
       }
     });
 
-    const pageText = await page.evaluate(() => document.body.innerText ?? "");
+    const pageText = await page.evaluate(function () { return document.body.innerText ?? ""; });
     if (pageText.includes("请重新登录")) {
       throw new Error("进入编辑器后仍然被微信要求重新登录。");
     }
@@ -858,7 +887,7 @@ export async function publishWechatDraft(input: {
 
     // Wait for title input to be visible (non-zero bounding rect)
     await page.waitForFunction(
-      (sel) => {
+      function (sel) {
         const el = document.querySelector(sel);
         if (!el) return false;
         const rect = el.getBoundingClientRect();
@@ -871,7 +900,7 @@ export async function publishWechatDraft(input: {
 
     // Also verify body editor is visible
     await page.waitForFunction(
-      (sel) => {
+      function (sel) {
         const el = document.querySelector(sel);
         if (!el) return false;
         const rect = el.getBoundingClientRect();
@@ -888,13 +917,13 @@ export async function publishWechatDraft(input: {
 
     await setInputValue(page, titleSelector, input.article.title);
     // Check what actually got written
-    const titleAfterWrite = await page.$eval(titleSelector, (node) =>
-      node instanceof HTMLTextAreaElement
+    const titleAfterWrite = await page.$eval(titleSelector, function (node) {
+      return node instanceof HTMLTextAreaElement
         ? { valueLen: node.value.length, value: node.value.substring(0, 80) }
         : node instanceof HTMLElement
           ? { valueLen: node.innerText.length, value: node.innerText.substring(0, 80) }
-          : null
-    );
+          : null;
+    });
     console.error("[write] title after setInputValue:", JSON.stringify(titleAfterWrite));
 
     if (authorSelector && input.article.metadata.author.trim()) {
@@ -908,37 +937,38 @@ export async function publishWechatDraft(input: {
     await resetBodyContent(page, bodySelector);
     await pasteBodyHtml(page, bodySelector, editorHtml, input.article.rawMarkdown);
 
-    let bodyHtml = await page.$eval(bodySelector, (node) =>
-      node instanceof HTMLElement ? node.innerHTML : ""
-    );
+    let bodyHtml = await page.$eval(bodySelector, function (node) {
+      return node instanceof HTMLElement ? node.innerHTML : "";
+    });
     if (!isRichTextStructurePreserved(bodyHtml)) {
       await fillBodyHtml(page, bodySelector, editorHtml);
-      bodyHtml = await page.$eval(bodySelector, (node) =>
-        node instanceof HTMLElement ? node.innerHTML : ""
-      );
+      bodyHtml = await page.$eval(bodySelector, function (node) {
+        return node instanceof HTMLElement ? node.innerHTML : "";
+      });
     }
 
     const titleValue = await page.$eval(
       titleSelector,
-      (node) =>
-        node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement
+      function (node) {
+        return node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement
           ? node.value.trim()
           : node instanceof HTMLElement
             ? (node.innerText ?? "").trim()
-            : ""
+            : "";
+      }
     );
-    const bodyLength = await page.$eval(bodySelector, (node) =>
-      node instanceof HTMLElement ? (node.innerText ?? "").trim().length : 0
-    );
+    const bodyLength = await page.$eval(bodySelector, function (node) {
+      return node instanceof HTMLElement ? (node.innerText ?? "").trim().length : 0;
+    });
     const richStructurePreserved = isRichTextStructurePreserved(bodyHtml);
 
     // Comprehensive debug: inspect all relevant inputs
-    const debugInfo = await page.evaluate(() => {
+    const debugInfo = await page.evaluate(function () {
       const results: Record<string, unknown> = {};
       const selectors = ["textarea#title", "input#title", "div.ProseMirror[contenteditable='true']", "textarea[name='title']", "input[name='title']"];
       for (const sel of selectors) {
         const els = document.querySelectorAll(sel);
-        results[sel] = Array.from(els).map((el: Element, i: number) => {
+        results[sel] = Array.from(els).map(function (el: Element, i: number) {
           const isInput = el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement;
           return isInput
             ? { i, tag: (el as HTMLElement).tagName, id: (el as HTMLElement).id, valueLen: (el as HTMLInputElement).value.length }
