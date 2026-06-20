@@ -34,6 +34,7 @@ export type ArticleSummary = {
     author: string;
     digest: string;
     wordCount: number;
+    originalChecked?: boolean;
   };
   mediaAssets: ArticleMediaAssets;
   status: ArticleStatus;

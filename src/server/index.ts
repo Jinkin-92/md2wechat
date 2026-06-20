@@ -37,3 +37,12 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
 app.listen(config.port, () => {
   console.log(`md2wechat api listening on http://localhost:${config.port}`);
 });
+
+// 兜底:Puppeteer / 第三方库抛 unhandledRejection 不能让整个 server 死。
+// (Chrome CDP 协议错误、扫码超时、网络抖动都可能触发)
+process.on("unhandledRejection", (reason) => {
+  console.error("[server] unhandledRejection (caught, server kept alive):", reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[server] uncaughtException (caught, server kept alive):", err);
+});

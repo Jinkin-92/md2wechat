@@ -22,6 +22,7 @@ import {
   uploadArticleAsset
 } from "../lib/api";
 import { CoverCropper } from "../components/CoverCropper";
+import { BodyImageEditor } from "../components/BodyImageEditor";
 import { extractEditableHtml, serializeEditableHtmlToMarkdown } from "../lib/rich-editor";
 import { readAppSettings } from "../lib/settings";
 import { getTemplateCardStyle } from "../lib/template-style";
@@ -85,6 +86,7 @@ export function WorkbenchPage() {
   const [error, setError] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [isRendering, setIsRendering] = useState(false);
+  const [isContentSaving, setIsContentSaving] = useState(false);
   const [isTypesetting, setIsTypesetting] = useState(false);
   const [coverCropperVisible, setCoverCropperVisible] = useState(false);
   const [coverCropperSrc, setCoverCropperSrc] = useState<string | null>(null);
@@ -110,6 +112,22 @@ export function WorkbenchPage() {
   const editorRef = useRef<HTMLDivElement | null>(null);
   const contentTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const metaTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /**
+   * 本地可编辑 HTML — BodyImageEditor 修复的核心。
+   *
+   * 之前设计:editor 每次 article.renderedHtml 变 → useEffect 把 DOM innerHTML 重置,
+   * BodyImageEditor paste 后调 POST /assets 触发 updatedAt 变 → DOM 被覆盖 → 用户看到 figure 没出现。
+   *
+   * 现在设计:
+   *   - editableHtml 是单一真相(source of truth),user 改 → state 变 → DOM 同步
+   *   - article 是 server 的镜像(只在保存时刷新)
+   *   - article 切换(load)时,editableHtml 从 article.renderedHtml 重新初始化
+   *   - BodyImageEditor paste → POST /assets → 拿新 article.renderedHtml → 转 editableHtml
+   *     → setEditableHtml → React 重渲染 → DOM 同步 (无需手动调 renderArticle)
+   */
+  const [editableHtml, setEditableHtml] = useState<string>("");
+  const [isContentDirty, setIsContentDirty] = useState<boolean>(false);
 
   useEffect(() => {
     writeWorkbenchState({ selectedArticleId, selectedTemplateId });
@@ -190,6 +208,8 @@ export function WorkbenchPage() {
   useEffect(() => {
     if (!selectedArticleId) {
       setArticle(null);
+      setEditableHtml("");
+      setIsContentDirty(false);
       return;
     }
 
@@ -218,6 +238,8 @@ export function WorkbenchPage() {
         setAuthorInput(hydratedPayload.metadata.author);
         setDigestInput(hydratedPayload.metadata.digest);
         setContentInput(hydratedPayload.rawMarkdown);
+        setEditableHtml(extractEditableHtml(hydratedPayload.renderedHtml));
+        setIsContentDirty(false);
       } catch {
         setError("加载文章失败");
       }
@@ -226,31 +248,85 @@ export function WorkbenchPage() {
     void load();
   }, [selectedArticleId]);
 
+  /**
+   * 同步 editor DOM ← editableHtml state (单一真相)。
+   *
+   * 检查 DOM 是否已是目标 HTML,只在我们确实不同步时才设 innerHTML。
+   * 为什么需要这个 guard:onInput 触发时,editableHtml 刚从 DOM 读取并 setState,
+   * useEffect 跑时 DOM 已经是这个 HTML,再设一遍会丢光标位置。
+   */
   useEffect(() => {
-    if (!article) return;
-    const nextEditorHtml = extractEditableHtml(article.renderedHtml);
-    if (editorRef.current && editorRef.current.innerHTML !== nextEditorHtml) {
-      editorRef.current.innerHTML = nextEditorHtml;
-    }
-  }, [article?.renderedHtml, article?.updatedAt]);
+    const root = editorRef.current;
+    if (!root) return;
+    if (root.innerHTML === editableHtml) return;
+    root.innerHTML = editableHtml;
+    // 设完 innerHTML 后浏览器会重置 selection,需要 restore
+  }, [editableHtml]);
 
-  const syncContent = useCallback(
-    (nextEditorMarkup: string) => {
-      if (!selectedArticleId || !article) return;
-      const nextMarkdown = serializeEditableHtmlToMarkdown(nextEditorMarkup, article);
+  /**
+   * 编辑正文 → 只改本地 editableHtml + dirty 标记。
+   * 之前 syncContent 会自动 debounce 500ms 后 PATCH /content + render,
+   * 现在改成纯本地,只在用户按"保存正文"按钮时才同步到 server。
+   */
+  const handleEditorInput = useCallback((event: React.FormEvent<HTMLDivElement>) => {
+    setEditableHtml(event.currentTarget.innerHTML);
+    setIsContentDirty(true);
+  }, []);
+
+  /**
+   * BodyImageEditor 调用的 mutation 回调(粘贴/工具栏)。
+   * 同样只改本地 state,React rerender 同步 DOM,光标位置由浏览器自动保留。
+   */
+  const handleEditorMutate = useCallback((nextHtml: string) => {
+    setEditableHtml(nextHtml);
+    setIsContentDirty(true);
+  }, []);
+
+  /**
+   * BodyImageEditor 上传图片后,server 返回的 ArticleDetail 已包含新 renderedHtml,
+   * 用它替换 editableHtml 并刷新 article(预览/元数据用)。
+   */
+  const handleArticleUploaded = useCallback((next: ArticleDetail) => {
+    setArticle(next);
+    setEditableHtml(extractEditableHtml(next.renderedHtml));
+    setIsContentDirty(true);
+  }, []);
+
+  /**
+   * "保存正文"按钮 → serializeEditableHtmlToMarkdown → PATCH /content → POST /render。
+   * 渲染完成后 editableHtml 从新 article.renderedHtml 重新初始化 + 清 dirty。
+   */
+  const handleSaveContent = useCallback(async () => {
+    if (!selectedArticleId || !article) return;
+    setIsContentSaving(true);
+    setMessage("");
+    setError("");
+    try {
+      const nextMarkdown = serializeEditableHtmlToMarkdown(editableHtml, article);
       setContentInput(nextMarkdown);
-      if (contentTimeoutRef.current) clearTimeout(contentTimeoutRef.current);
-      contentTimeoutRef.current = setTimeout(async () => {
-        try {
-          await updateArticleContent(selectedArticleId, nextMarkdown);
-          await triggerRender(nextMarkdown, titleInput, authorInput);
-        } catch {
-          setError("正文同步失败");
-        }
-      }, 500);
-    },
-    [article, authorInput, selectedArticleId, titleInput, triggerRender]
-  );
+      const updated = await updateArticleContent(selectedArticleId, nextMarkdown);
+      // PATCH /content 不重渲染,自己触发 render
+      const settings = readAppSettings();
+      const reRendered = await renderArticle(selectedArticleId, article.templateId ?? "claude", {
+        fontSize,
+        lineHeight: { compact: "1.5", normal: "1.8", relaxed: "2.0" }[spacing],
+        paragraphIndent,
+        sectionDivider,
+        endMarker,
+        platformName: settings.platformName,
+        originalChecked: settings.originalChecked
+      });
+      // updated 也带新 rawMarkdown;reRendered 带新 renderedHtml
+      setArticle({ ...updated, ...reRendered, rawMarkdown: nextMarkdown });
+      setEditableHtml(extractEditableHtml(reRendered.renderedHtml));
+      setIsContentDirty(false);
+      setMessage("正文已保存");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "保存正文失败");
+    } finally {
+      setIsContentSaving(false);
+    }
+  }, [editableHtml, article, selectedArticleId, fontSize, spacing, paragraphIndent, sectionDivider, endMarker]);
 
   const syncMetadata = useCallback(
     (nextTitle: string, nextAuthor: string, nextDigest: string) => {
@@ -869,17 +945,37 @@ export function WorkbenchPage() {
               className="workbench-rich-editor"
               contentEditable
               suppressContentEditableWarning
-              onInput={(event) => {
-                const nextHtml = event.currentTarget.innerHTML;
-                syncContent(nextHtml);
-              }}
+              onInput={handleEditorInput}
             />
           </div>
 
           <div className="workbench-statusbar">
             {message && <span style={{ color: "var(--green)", fontSize: "13px" }}>{message}</span>}
             {error && <span style={{ color: "var(--red)", fontSize: "13px" }}>{error}</span>}
-            {!message && !error && <span />}
+            {!message && !error && (
+              <span style={{ color: isContentDirty ? "#c96442" : "var(--text-muted)", fontSize: "13px" }}>
+                {isContentDirty ? "● 正文有未保存修改" : ""}
+              </span>
+            )}
+            <button
+              className="workbench-save-content-btn"
+              onClick={() => void handleSaveContent()}
+              disabled={isContentSaving || !isContentDirty}
+              title={isContentDirty ? "把本地编辑同步到 server 并重新渲染" : "正文已是最新"}
+              style={{
+                marginRight: 12,
+                padding: "4px 14px",
+                borderRadius: 6,
+                border: 0,
+                background: isContentDirty ? "#c96442" : "rgba(0,0,0,0.1)",
+                color: isContentDirty ? "white" : "var(--text-muted)",
+                cursor: isContentDirty ? "pointer" : "default",
+                fontSize: 13,
+                fontWeight: 500
+              }}
+            >
+              {isContentSaving ? "保存中..." : "保存正文"}
+            </button>
             <div className="workbench-word-count">
               {isRendering ? "渲染中..." : `${wordCount} 字 · ${readTime} 分钟阅读`}
             </div>
@@ -1157,6 +1253,19 @@ export function WorkbenchPage() {
             </button>
           </div>
         </div>
+      )}
+
+      {/* 正文图片编辑器:粘贴/拖拽上传 + figure 工具栏(替换/上移/下移/删除) */}
+      {article && (
+        <BodyImageEditor
+          editorRef={editorRef}
+          article={article}
+          editableHtml={editableHtml}
+          onEditorMutate={handleEditorMutate}
+          onArticleUploaded={handleArticleUploaded}
+          onMessage={setMessage}
+          onError={setError}
+        />
       )}
     </div>
   );
