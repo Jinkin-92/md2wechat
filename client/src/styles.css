@@ -2229,7 +2229,8 @@ code {
 }
 
 .settings-input,
-.settings-select {
+.settings-select,
+select.settings-input {
   width: 100%;
   padding: 10px 14px;
   border-radius: 10px;
@@ -2238,6 +2239,7 @@ code {
   font-size: 14px;
   color: var(--text-primary);
   transition: border-color 0.15s;
+  appearance: auto;
 }
 
 .settings-input:focus,
@@ -2314,6 +2316,37 @@ code {
 .settings-account-status.disconnected {
   background: rgba(0, 0, 0, 0.05);
   color: var(--text-muted);
+}
+
+.settings-agents-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.settings-agent-checking {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.settings-agent-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 980px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.settings-agent-badge.installed {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.settings-agent-badge.not-installed {
+  background: #fee2e2;
+  color: #991b1b;
 }
 
 .settings-account-btn {

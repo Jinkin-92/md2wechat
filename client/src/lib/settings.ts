@@ -1,6 +1,7 @@
 export const SETTINGS_KEY = "mdpublisher_settings";
 
 export type AppSettings = {
+  aiEngine: "api" | "claude" | "cursor" | "gemini" | "copilot" | "opencode" | "qwen" | "aider" | "codex";
   textApiUrl: string;
   textApiKey: string;
   textModel: string;
@@ -12,6 +13,7 @@ export type AppSettings = {
 };
 
 export const DEFAULT_SETTINGS: AppSettings = {
+  aiEngine: "api",
   textApiUrl: "https://api.minimaxi.com/anthropic",
   textApiKey: "",
   textModel: "MiniMax-M2.7",
@@ -54,6 +56,7 @@ export function readAppSettings(): AppSettings {
     const legacy = migrateLegacySettings(parsed);
 
     return {
+      aiEngine: (parsed.aiEngine as AppSettings["aiEngine"]) ?? DEFAULT_SETTINGS.aiEngine,
       textApiUrl: (parsed.textApiUrl as string) ?? legacy.textApiUrl ?? DEFAULT_SETTINGS.textApiUrl,
       textApiKey: (parsed.textApiKey as string) ?? legacy.textApiKey ?? DEFAULT_SETTINGS.textApiKey,
       textModel: (parsed.textModel as string) ?? legacy.textModel ?? DEFAULT_SETTINGS.textModel,

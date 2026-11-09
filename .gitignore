@@ -63,3 +63,7 @@ workbench-*.png
 
 # BMad output (generated)
 _bmad-output/
+
+# runtime state containing wechat session tokens - never commit
+data/publish/accounts.json
+data/publish/tasks.json

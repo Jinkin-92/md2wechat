@@ -567,3 +567,55 @@ export async function applySmartTypesetting(input: {
 
   return payload;
 }
+
+// ==================== Agent Detection ====================
+
+export interface DetectedAgent {
+  id: string;
+  name: string;
+  installed: boolean;
+}
+
+export async function fetchDetectedAgents(): Promise<DetectedAgent[]> {
+  const response = await fetch(buildApiUrl("/api/agents"));
+  const payload = await parseJsonResponse<{ agents: DetectedAgent[] }>(response);
+  if (!response.ok) {
+    return [];
+  }
+  return payload.agents ?? [];
+}
+
+// ==================== SSE Streaming ====================
+
+export type StreamCallback = (data: { html?: string; done?: boolean; error?: string }) => void;
+
+export function createAgentStream(
+  agentId: string,
+  input: string,
+  system: string,
+  onChunk: StreamCallback,
+  onError: (err: Error) => void
+): () => void {
+  const es = new EventSource(
+    `${buildApiUrl("/api/convert")}?agent=${encodeURIComponent(agentId)}&input=${encodeURIComponent(input)}&system=${encodeURIComponent(system)}`
+  );
+
+  es.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      onChunk(data);
+      if (data.done || data.error) {
+        es.close();
+      }
+    } catch {
+      // ignore parse errors
+    }
+  };
+
+  es.onerror = () => {
+    onError(new Error("SSE 连接失败"));
+    es.close();
+  };
+
+  return () => es.close();
+}

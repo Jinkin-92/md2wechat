@@ -1,0 +1,85 @@
+/* -*- coding: utf-8 -*-
+ * md2wechat Design Tokens
+ * 基于 anti-AI-slop 约束设计系统
+ */
+
+:root {
+  /* ==================== 字体系统 ====================
+   * CJK-first 字体栈：中文优先，加载失败才 fallback 英文
+   */
+  --font-cjk: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', 'Source Han Sans CN', sans-serif;
+  --font-cjk-serif: 'Noto Serif SC', 'PingFang SC', 'Microsoft YaHei', 'Source Han Serif CN', serif;
+  --font-latin: 'Inter', 'Manrope', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', 'Consolas', monospace;
+
+  /* ==================== 8px 基准网格 ====================
+   * 所有 spacing/line-height/font-size 必须是 8 的倍数
+   */
+  --space-1: 8px;
+  --space-2: 16px;
+  --space-3: 24px;
+  --space-4: 32px;
+  --space-5: 40px;
+  --space-6: 48px;
+  --space-8: 64px;
+
+  /* 字号 (8px 倍数) */
+  --text-xs: 12px;    /* 12 = 8 + 4 */
+  --text-sm: 14px;    /* 14 ≠ 8n，暂时保留 */
+  --text-base: 16px; /* 16 = 8 × 2 */
+  --text-lg: 20px;   /* 20 = 8 × 2 + 4 */
+  --text-xl: 24px;   /* 24 = 8 × 3 */
+  --text-2xl: 32px;  /* 32 = 8 × 4 */
+  --text-3xl: 40px;  /* 40 = 8 × 5 */
+
+  /* 行高 (8px 倍数) */
+  --leading-tight: 16px;  /* 16 = 8 × 2 */
+  --leading-normal: 24px;  /* 24 = 8 × 3 */
+  --leading-relaxed: 32px; /* 32 = 8 × 4 */
+
+  /* ==================== 色彩系统 ====================
+   * 柔和色系，禁止纯黑(#000)/纯白(#FFF)
+   * 对比度 >= 4.5 (WCAG AA)
+   */
+  --color-bg: #FAFAF8;
+  --color-surface: #FFFFFF;
+  --color-surface-raised: #F5F4F0;
+
+  /* 文字色 - 非纯黑 */
+  --color-text-primary: #1A1A1A;
+  --color-text-secondary: #666666;
+  --color-text-muted: #999999;
+
+  /* 强调色 */
+  --color-accent: #4A90D9;
+  --color-accent-hover: #3A7BC8;
+
+  /* 边框/分割 */
+  --color-border: #E8E8E6;
+  --color-border-strong: #D0CFC8;
+
+  /* 状态色 */
+  --color-success: #34A853;
+  --color-warning: #FBBC04;
+  --color-error: #EA4335;
+
+  /* ==================== 圆角与阴影 ====================
+   * 柔和圆角，禁止锐利边缘
+   */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+
+  /* 柔和阴影，禁止硬边 */
+  --shadow-sm: 0 1px 2px rgba(26, 26, 26, 0.04);
+  --shadow-md: 0 4px 12px rgba(26, 26, 26, 0.08);
+  --shadow-lg: 0 8px 32px rgba(26, 26, 26, 0.12);
+
+  /* ==================== 过渡动画 ====================
+   * 使用 ease-out，禁止突然跳转
+   */
+  --transition-fast: 150ms ease-out;
+  --transition-normal: 250ms ease-out;
+  --transition-slow: 400ms ease-out;
+}

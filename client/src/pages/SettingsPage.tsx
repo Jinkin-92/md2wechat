@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
-import { testAiConnection, testImageAiConnection } from "../lib/api";
+import { fetchDetectedAgents, testAiConnection, testImageAiConnection } from "../lib/api";
+import type { DetectedAgent } from "../lib/api";
 import { DEFAULT_SETTINGS, readAppSettings, writeAppSettings } from "../lib/settings";
 
 function ModelInput(props: { label: string; value: string; onChange: (value: string) => void }) {
@@ -37,6 +38,10 @@ export function SettingsPage() {
   const [platformName, setPlatformName] = useState(DEFAULT_SETTINGS.platformName);
   const [originalChecked, setOriginalChecked] = useState(DEFAULT_SETTINGS.originalChecked);
 
+  // AI Engine
+  const [aiEngine, setAiEngine] = useState(DEFAULT_SETTINGS.aiEngine);
+  const [detectedAgents, setDetectedAgents] = useState<DetectedAgent[]>([]);
+
   const [message, setMessage] = useState("");
   const [isTesting, setIsTesting] = useState(false);
 
@@ -50,11 +55,17 @@ export function SettingsPage() {
     setImageModel(settings.imageModel);
     setPlatformName(settings.platformName);
     setOriginalChecked(settings.originalChecked);
+    setAiEngine(settings.aiEngine);
 
-    }, []);
+    // 检测已安装的 CLI
+    fetchDetectedAgents()
+      .then(setDetectedAgents)
+      .catch(() => setDetectedAgents([]));
+  }, []);
 
   function handleSave() {
     writeAppSettings({
+      aiEngine,
       textApiUrl,
       textApiKey,
       textModel,
@@ -117,53 +128,107 @@ export function SettingsPage() {
       </div>
 
       <div className="settings-body">
-        {/* Text AI */}
+        {/* AI Engine Selector */}
         <div className="settings-card">
           <div className="settings-card-header">
-            <h2 className="settings-card-title">智能排版 AI（文本模型）</h2>
-            <p className="settings-card-desc">用于智能排版、生成摘要、生成封面提示词</p>
+            <h2 className="settings-card-title">AI 引擎</h2>
+            <p className="settings-card-desc">选择智能排版使用的 AI 引擎</p>
           </div>
           <div className="settings-card-body">
             <div className="settings-field">
-              <label className="settings-field-label">API URL</label>
-              <input
-                type="text"
+              <label className="settings-field-label">引擎类型</label>
+              <select
                 className="settings-input"
-                placeholder="https://api.minimaxi.com/anthropic"
-                value={textApiUrl}
-                onChange={(event) => setTextApiUrl(event.target.value)}
-              />
+                value={aiEngine}
+                onChange={(event) => setAiEngine(event.target.value as typeof aiEngine)}
+              >
+                <option value="api">API 模式（需要 API Key）</option>
+                <option value="claude">Claude Code（本地 CLI）</option>
+                <option value="cursor">Cursor Agent（本地 CLI）</option>
+                <option value="gemini">Gemini CLI（本地 CLI）</option>
+                <option value="copilot">GitHub Copilot（本地 CLI）</option>
+                <option value="opencode">OpenCode（本地 CLI）</option>
+                <option value="qwen">Qwen Coder（本地 CLI）</option>
+                <option value="aider">Aider（本地 CLI）</option>
+                <option value="kimi">Kimi Code（本地 CLI）</option>
+                <option value="codex">OpenAI Codex（本地 CLI）</option>
+              </select>
             </div>
-            <div className="settings-field">
-              <label className="settings-field-label">API Key</label>
-              <input
-                type="password"
-                className="settings-input"
-                placeholder="sk-..."
-                value={textApiKey}
-                onChange={(event) => setTextApiKey(event.target.value)}
-              />
-            </div>
-            <ModelInput
-              label="模型"
-              value={textModel}
-              onChange={setTextModel}
-            />
-            <div className="settings-save-row settings-save-row-left">
-              <button className="settings-account-btn" onClick={() => void handleTestTextAi()} disabled={isTesting}>
-                {isTesting ? "测试中..." : "连接测试"}
-              </button>
-            </div>
+            {aiEngine !== "api" && (
+              <div className="settings-field">
+                <label className="settings-field-label">本地 CLI 状态</label>
+                <div className="settings-agents-list">
+                  {detectedAgents.length === 0 ? (
+                    <span className="settings-agent-checking">正在检测...</span>
+                  ) : detectedAgents.filter((a) => a.id === aiEngine).map((agent) => (
+                    <span
+                      key={agent.id}
+                      className={`settings-agent-badge ${agent.installed ? "installed" : "not-installed"}`}
+                    >
+                      {agent.name}: {agent.installed ? "已连接" : "未检测到"}
+                    </span>
+                  ))}
+                </div>
+                <p className="settings-card-desc" style={{ marginTop: "8px" }}>
+                  {aiEngine !== "api"
+                    ? "使用本地已登录的 CLI 会话，无需 API Key，零成本。"
+                    : "使用第三方 API，需要配置 API Key。"}
+                </p>
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Image AI */}
-        <div className="settings-card">
-          <div className="settings-card-header">
-            <h2 className="settings-card-title">图像生成 AI</h2>
-            <p className="settings-card-desc">用于 AI 生成公众号封面图</p>
+        {/* Text AI - 仅 API 模式显示 */}
+        {aiEngine === "api" && (
+          <div className="settings-card">
+            <div className="settings-card-header">
+              <h2 className="settings-card-title">智能排版 AI（文本模型）</h2>
+              <p className="settings-card-desc">用于智能排版、生成摘要、生成封面提示词</p>
+            </div>
+            <div className="settings-card-body">
+              <div className="settings-field">
+                <label className="settings-field-label">API URL</label>
+                <input
+                  type="text"
+                  className="settings-input"
+                  placeholder="https://api.minimaxi.com/anthropic"
+                  value={textApiUrl}
+                  onChange={(event) => setTextApiUrl(event.target.value)}
+                />
+              </div>
+              <div className="settings-field">
+                <label className="settings-field-label">API Key</label>
+                <input
+                  type="password"
+                  className="settings-input"
+                  placeholder="sk-..."
+                  value={textApiKey}
+                  onChange={(event) => setTextApiKey(event.target.value)}
+                />
+              </div>
+              <ModelInput
+                label="模型"
+                value={textModel}
+                onChange={setTextModel}
+              />
+              <div className="settings-save-row settings-save-row-left">
+                <button className="settings-account-btn" onClick={() => void handleTestTextAi()} disabled={isTesting}>
+                  {isTesting ? "测试中..." : "连接测试"}
+                </button>
+              </div>
+            </div>
           </div>
-          <div className="settings-card-body">
+        )}
+
+        {/* Image AI */}
+        {aiEngine === "api" && (
+          <div className="settings-card">
+            <div className="settings-card-header">
+              <h2 className="settings-card-title">图像生成 AI</h2>
+              <p className="settings-card-desc">用于 AI 生成公众号封面图</p>
+            </div>
+            <div className="settings-card-body">
             <div className="settings-field">
               <label className="settings-field-label">API URL</label>
               <input
@@ -195,7 +260,7 @@ export function SettingsPage() {
               </button>
             </div>
           </div>
-        </div>
+        )}
 
         {/* Platform */}
         <div className="settings-card">
